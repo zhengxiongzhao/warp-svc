@@ -1,0 +1,30 @@
+services:
+  cloudflare-warp:
+    # image: zhengxiongzhao/warp-svc:latest
+    container_name: cloudflare-warp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    ports:
+      - "1080:1080"
+    mem_limit: 512m
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - MKNOD
+      - AUDIT_WRITE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      TZ: Asia/Shanghai
+      PROXY_PORT: 1080
+      FAMILIES_MODE: off
+      LOG_LEVEL: error
+    # Optional: Persist WARP account data
+    # volumes:
+    #   - ./data:/var/lib/cloudflare-warp
