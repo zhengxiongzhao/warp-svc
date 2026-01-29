@@ -81,4 +81,26 @@ if [ -n "$WARP_ENABLE_NAT" ]; then
 fi
 
 # start the proxy
-gost $GOST_ARGS
+case "$GOST_LOGGER_LEVEL" in
+    fatal)
+        gost $GOST_ARGS > /dev/null 2>&1
+        ;;
+    error)
+        gost $GOST_ARGS 2> /dev/null
+        ;;
+    warn)
+        gost $GOST_ARGS > >(grep -E '^(WARN|ERROR|FATAL)' || true) 2> /dev/null
+        ;;
+    info)
+        gost $GOST_ARGS > >(grep -E '^(INFO|WARN|ERROR|FATAL)' || true) 2> /dev/null
+        ;;
+    debug)
+        gost $GOST_ARGS > >(grep -E '^(DEBUG|INFO|WARN|ERROR|FATAL)' || true) 2> /dev/null
+        ;;
+    trace)
+        gost $GOST_ARGS
+        ;;
+    *)
+        gost $GOST_ARGS
+        ;;
+esac
