@@ -80,7 +80,13 @@ if [ -n "$WARP_ENABLE_NAT" ]; then
     sudo nft add rule ip6 mangle forward tcp flags syn tcp option maxseg size set rt mtu
 fi
 
-# start the proxy
+# Start WARP monitor script first (before gost blocks)
+if [ "${ENABLE_MONITOR:-true}" = "true" ]; then
+    echo "[Monitor] Starting WARP connection monitor..."
+    /healthcheck/monitor-warp.sh &
+fi
+
+# start the proxy (this will block and keep the container running)
 case "$GOST_LOGGER_LEVEL" in
     fatal)
         gost $GOST_ARGS > /dev/null 2>&1

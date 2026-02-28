@@ -21,11 +21,72 @@ This Docker image packages the official Cloudflare WARP client for Linux and pro
 
 ## Features
 
-✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically  
-🛡️ **Families Mode** - Configurable DNS filtering (off/malware/full)  
-⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data  
-🔄 **Health Monitoring** - Built-in health checks with automatic recovery  
+✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically
+🛡️ **Families Mode** - Configurable DNS filtering (off/malware/full)
+⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data
+🔄 **Health Monitoring** - Built-in health checks with automatic recovery
 🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms
+
+---
+
+## WARP Connection Monitor
+
+The container includes a built-in WARP connection monitor that automatically detects and recovers from connection failures.
+
+### How It Works
+
+The monitor runs as a background process and periodically checks the WARP connection status:
+
+1. **Connection Check**: Every `MONITOR_INTERVAL` seconds (default: 30s), the monitor verifies if WARP is connected
+2. **Automatic Reconnection**: If the connection is lost, it attempts to reconnect up to `MAX_RETRIES` times (default: 3)
+3. **Service Restart**: If reconnection fails after all retries, the monitor restarts the `warp-svc` service
+4. **Logging**: All recovery actions are logged for troubleshooting
+
+### Configuration
+
+The monitor is enabled by default and can be configured using environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_MONITOR` | `true` | Enable or disable the monitor |
+| `MONITOR_INTERVAL` | `30` | Check interval in seconds |
+| `MAX_RETRIES` | `3` | Maximum reconnection attempts |
+| `RETRY_DELAY` | `10` | Delay between retries in seconds |
+| `RECONNECT_WAIT` | `10` | Wait time after reconnect attempt before checking connection status |
+| `RESTART_WAIT` | `15` | Wait time after restarting warp-svc before attempting to connect |
+
+### Disabling the Monitor
+
+If you prefer to handle connection failures manually, set `ENABLE_MONITOR=false`:
+
+```yaml
+environment:
+  ENABLE_MONITOR: "false"
+```
+
+### Viewing Monitor Logs
+
+The monitor outputs detailed logs to help troubleshoot connection issues:
+
+```bash
+docker logs cloudflare-warp | grep Monitor
+```
+
+Example output:
+```
+[Monitor] Starting WARP connection monitor...
+[Monitor] Configuration: interval=30s, max_retries=3, retry_delay=10s, reconnect_wait=10s, restart_wait=15s
+[Monitor] Checking WARP connection...
+[Monitor] WARP connection OK
+[Monitor] Checking WARP connection...
+[Monitor] WARP connection lost, attempting to reconnect...
+[Monitor] Reconnect attempt 1/3...
+[Monitor] Waiting 10s for WARP connection to establish...
+[Monitor] Checking connection status after reconnect...
+[Monitor] WARP reconnected successfully!
+```
+
+**Note:** When `WARP_LICENSE` is set, the monitor preserves the WARP data directory during restarts to protect your WARP+ device quota. When `WARP_LICENSE` is not set, the monitor removes the data directory to force re-registration and recover from corrupted state.
 
 ---
 
@@ -105,6 +166,13 @@ services:
       PROXY_PORT: 1080
       FAMILIES_MODE: off
       LOG_LEVEL: error
+      # WARP Monitor Configuration (optional, defaults shown)
+      # ENABLE_MONITOR: "true"
+      # MONITOR_INTERVAL: "30"
+      # MAX_RETRIES: "3"
+      # RETRY_DELAY: "10"
+      # RECONNECT_WAIT: "10"
+      # RESTART_WAIT: "15"
     # Optional: Persist WARP account data
     # volumes:
     #   - ./data:/var/lib/cloudflare-warp
@@ -148,6 +216,13 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e PROXY_PORT=1080 \
   -e FAMILIES_MODE=off \
+  # WARP Monitor Configuration (optional, defaults shown)
+  # -e ENABLE_MONITOR="true" \
+  # -e MONITOR_INTERVAL="30" \
+  # -e MAX_RETRIES="3" \
+  # -e RETRY_DELAY="10" \
+  # -e RECONNECT_WAIT="10" \
+  # -e RESTART_WAIT="15" \
   -p 1080:1080 \
   zhengxiongzhao/warp-svc:latest
 ```
@@ -166,6 +241,12 @@ docker run -d \
 | `FAMILIES_MODE` | `off` | DNS filtering mode:<br/>• `off` - No filtering<br/>• `malware` - Block malware<br/>• `full` - Block malware and adult content |
 | `WARP_LICENSE` | _(empty)_ | WARP+ license key for unlimited data |
 | `WARP_SLEEP` | `2` | Seconds to wait for warp-svc initialization |
+| `ENABLE_MONITOR` | `true` | Enable WARP connection monitoring with automatic recovery |
+| `MONITOR_INTERVAL` | `30` | Monitoring check interval in seconds |
+| `MAX_RETRIES` | `3` | Maximum number of reconnection attempts before restarting warp-svc |
+| `RETRY_DELAY` | `10` | Delay in seconds between reconnection attempts |
+| `RECONNECT_WAIT` | `10` | Wait time in seconds after reconnect attempt before checking connection status |
+| `RESTART_WAIT` | `15` | Wait time in seconds after restarting warp-svc before attempting to connect |
 
 ### Persistent Storage
 

@@ -61,6 +61,7 @@ RUN case ${TARGETPLATFORM} in \
     chmod +x /usr/bin/gost && \
     chmod +x /entrypoint.sh && \
     chmod +x /healthcheck/index.sh && \
+    chmod +x /healthcheck/monitor-warp.sh && \
     useradd -m -s /bin/bash warp && \
     echo "warp ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/warp
 
@@ -73,6 +74,12 @@ RUN mkdir -p /home/warp/.local/share/warp && \
 ENV REGISTER_WHEN_MDM_EXISTS=
 ENV BETA_FIX_HOST_CONNECTIVITY=
 ENV WARP_ENABLE_NAT=
+ENV ENABLE_MONITOR=
+ENV MONITOR_INTERVAL=
+ENV MAX_RETRIES=
+ENV RETRY_DELAY=
+ENV RECONNECT_WAIT=
+ENV RESTART_WAIT=
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD /healthcheck/index.sh
