@@ -3,7 +3,7 @@
 # exit when any command fails
 set -e
 
-export WARP_SLEEP=${WARP_SLEEP:-5}
+export WARP_SLEEP=${WARP_SLEEP:-2}
 export GOST_LOGGER_LEVEL=${LOG_LEVEL:-error}
 export GOST_ARGS="-L :${PROXY_PORT:-1080}"
 export WARP_LICENSE_KEY=${WARP_LICENSE}

@@ -7,14 +7,16 @@ set +e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Configuration
-MONITOR_INTERVAL=${MONITOR_INTERVAL:-30}
-MAX_RETRIES=${MAX_RETRIES:-3}
-RETRY_DELAY=${RETRY_DELAY:-10}
-RECONNECT_WAIT=${RECONNECT_WAIT:-10}
-RESTART_WAIT=${RESTART_WAIT:-15}
+MONITOR_INTERVAL=${MONITOR_INTERVAL:-5}
+MAX_CHECK_RETRIES=${MAX_CHECK_RETRIES:-3}
+RESTART_WAIT=${RESTART_WAIT:-${WARP_SLEEP:-2}}
 
-echo "[Monitor] Starting WARP connection monitor..."
-echo "[Monitor] Configuration: interval=${MONITOR_INTERVAL}s, max_retries=${MAX_RETRIES}, retry_delay=${RETRY_DELAY}s, reconnect_wait=${RECONNECT_WAIT}s, restart_wait=${RESTART_WAIT}s"
+# Monitor started silently
+
+# Check count
+check_count=0
+# Failed check count
+failed_count=0
 
 # Function to get warp-svc PID
 get_warp_svc_pid() {
@@ -92,57 +94,22 @@ start_warp_svc() {
 }
 
 while true; do
-    # Check WARP connection using the same logic as healthcheck
-    echo "[Monitor] Checking WARP connection..."
-    TRACE_OUTPUT=$(curl -fsS --max-time 10 "https://cloudflare.com/cdn-cgi/trace" 2>&1)
-    CURL_EXIT_CODE=$?
+    check_count=$((check_count + 1))
+    # Check if warp-svc process is running
+    WARP_PID=$(get_warp_svc_pid)
     
-    if [ $CURL_EXIT_CODE -ne 0 ]; then
-        echo "[Monitor] curl failed with exit code $CURL_EXIT_CODE: $TRACE_OUTPUT"
-    fi
-    
-    if ! echo "$TRACE_OUTPUT" | grep -qE "warp=(plus|on)"; then
-        echo "[Monitor] WARP connection lost, attempting to reconnect..."
+    if [ -z "$WARP_PID" ]; then
+        failed_count=$((failed_count + 1))
         
-        retry_count=0
-        while [ $retry_count -lt $MAX_RETRIES ]; do
-            echo "[Monitor] Reconnect attempt $((retry_count + 1))/${MAX_RETRIES}..."
+        # If failed count reaches max, restart warp-svc
+        if [ $failed_count -ge $MAX_CHECK_RETRIES ]; then
+            echo "[Monitor] Max failed checks reached, restarting warp-svc..."
+            failed_count=0
             
-            # Try to reconnect
-            warp-cli --accept-tos disconnect 2>&1 || true
-            sleep 2
-            warp-cli --accept-tos connect 2>&1 || true
-            
-            # Wait for connection to establish (longer wait time)
-            echo "[Monitor] Waiting ${RECONNECT_WAIT}s for WARP connection to establish..."
-            sleep $RECONNECT_WAIT
-            
-            # Check if reconnection was successful
-            echo "[Monitor] Checking connection status after reconnect..."
-            TRACE_OUTPUT=$(curl -fsS --max-time 10 "https://cloudflare.com/cdn-cgi/trace" 2>&1)
-            CURL_EXIT_CODE=$?
-            
-            if [ $CURL_EXIT_CODE -eq 0 ] && echo "$TRACE_OUTPUT" | grep -qE "warp=(plus|on)"; then
-                echo "[Monitor] WARP reconnected successfully!"
-                break
-            else
-                echo "[Monitor] Reconnection check failed (curl exit code: $CURL_EXIT_CODE)"
-                if [ $CURL_EXIT_CODE -eq 0 ]; then
-                    echo "[Monitor] Trace output: $TRACE_OUTPUT"
-                fi
-            fi
-            
-            retry_count=$((retry_count + 1))
-            if [ $retry_count -lt $MAX_RETRIES ]; then
-                echo "[Monitor] Reconnect attempt failed, retrying in ${RETRY_DELAY}s..."
-                sleep $RETRY_DELAY
-            fi
-        done
-        
-        # If max retries reached, restart warp-svc service
-        if [ $retry_count -ge $MAX_RETRIES ]; then
-            echo "[Monitor] Max retries reached, restarting warp-svc..."
+            # Stop any lingering processes and clean up
             stop_warp_svc
+            
+            # Start warp-svc
             start_warp_svc
             
             if [ $? -eq 0 ]; then
@@ -168,15 +135,15 @@ while true; do
                 
                 # Connect to WARP
                 warp-cli --accept-tos connect 2>&1 || true
-                echo "[Monitor] Waiting ${RECONNECT_WAIT}s for WARP connection to establish..."
-                sleep $RECONNECT_WAIT
+                echo "[Monitor] Waiting ${RESTART_WAIT}s for WARP connection to establish..."
+                sleep $RESTART_WAIT
                 echo "[Monitor] warp-svc restarted and reconnected"
             else
                 echo "[Monitor] Error: Failed to restart warp-svc"
             fi
         fi
     else
-        echo "[Monitor] WARP connection OK"
+        failed_count=0
     fi
     
     sleep $MONITOR_INTERVAL
