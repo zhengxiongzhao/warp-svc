@@ -3,10 +3,6 @@
 [![Publish Docker image to Docker Hub](https://img.shields.io/badge/Publish%20Docker%20image%20to%20Docker%20Hub-latest-g?logo=docker)](https://hub.docker.com/r/zhengxiongzhao/warp-svc)
 [![Docker Pulls](https://img.shields.io/docker/pulls/zhengxiongzhao/warp-svc)](https://hub.docker.com/r/zhengxiongzhao/warp-svc)
 
-> **Built with the latest version of `warp-svc`, version: 2025.9.558.0**
-
-> **⚠️ Requirement: International network access is required !**
-
 ## Overview
 
 Run Cloudflare WARP client as a SOCKS5 proxy server in Docker.
@@ -15,86 +11,14 @@ This Docker image packages the official Cloudflare WARP client for Linux and pro
 - Local machine applications
 - Other Docker containers via docker-compose
 
-**Why this project?** The official Cloudflare WARP client for Linux only listens on localhost, making it unusable in Docker containers that need to bind to 0.0.0.0. This image solves that problem by using `gost` to forward traffic.
-
 ---
 
 ## Features
 
-✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically
-🛡️ **Families Mode** - Configurable DNS filtering (off/malware/full)
-⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data
-🔄 **Health Monitoring** - Built-in health checks with automatic recovery
-🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms
-
----
-
-## WARP Connection Monitor
-
-The container includes a built-in WARP connection monitor that automatically detects and recovers from process failures.
-
-### How It Works
-
-The monitor runs as a background process and periodically checks warp-svc process status:
-
-1. **Process Check**: Every `MONITOR_INTERVAL` seconds (default: 5s), the monitor verifies if the warp-svc process is running
-2. **Failure Tracking**: If the process is not found, it increments a failure counter
-3. **Automatic Recovery**: When the failure counter reaches `MAX_CHECK_RETRIES` (default: 3), the monitor restarts the `warp-svc` service
-4. **Counter Reset**: If the process is detected during a check, the failure counter is reset to 0
-5. **Logging**: All recovery actions are logged for troubleshooting
-
-### Configuration
-
-The monitor is enabled by default and can be configured using environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENABLE_MONITOR` | `true` | Enable or disable monitor |
-| `MONITOR_INTERVAL` | `5` | Check interval in seconds |
-| `MAX_CHECK_RETRIES` | `3` | Maximum consecutive failed checks before restarting warp-svc |
-| `RESTART_WAIT` | `${WARP_SLEEP}` | Wait time after restarting warp-svc before attempting to connect (defaults to WARP_SLEEP) |
-
-### Disabling Monitor
-
-If you prefer to handle process failures manually, set `ENABLE_MONITOR=false`:
-
-```yaml
-environment:
-  ENABLE_MONITOR: "false"
-```
-
-### Viewing Monitor Logs
-
-The monitor outputs detailed logs to help troubleshoot connection issues:
-
-```bash
-docker logs cloudflare-warp | grep Monitor
-```
-
-Example output:
-```
-[Monitor] Starting WARP connection monitor...
-[Monitor] Configuration: interval=5s, max_check_retries=3, restart_wait=2s
-[Monitor] Checking warp-svc process... (check #1)
-[Monitor] warp-svc process OK (PID: 123)
-[Monitor] Checking warp-svc process... (check #2)
-[Monitor] warp-svc process not found (failed: 1/3)
-[Monitor] Checking warp-svc process... (check #3)
-[Monitor] warp-svc process not found (failed: 2/3)
-[Monitor] Checking warp-svc process... (check #4)
-[Monitor] warp-svc process not found (failed: 3/3)
-[Monitor] Max failed checks reached, restarting warp-svc...
-[Monitor] Stopping warp-svc...
-[Monitor] warp-svc stopped
-[Monitor] Starting warp-svc...
-[Monitor] Waiting 2s for warp-svc to start...
-[Monitor] warp-svc started (PID: 456)
-[Monitor] WARP client already registered, skipping registration
-[Monitor] Waiting 2s for WARP connection to establish...
-[Monitor] warp-svc restarted and reconnected
-```
-
-**Note:** When `WARP_LICENSE` is set, the monitor preserves the WARP data directory during restarts to protect your WARP+ device quota. When `WARP_LICENSE` is not set, the monitor removes the data directory to force re-registration and recover from corrupted state.
+✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically  
+🛡️ **Families Mode** - Configurable DNS filtering (off/malware/full)  
+⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data  
+🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms  
 
 ---
 
@@ -155,33 +79,17 @@ services:
     image: zhengxiongzhao/warp-svc:latest
     container_name: cloudflare-warp
     restart: always
-    device_cgroup_rules:
-      - 'c 10:200 rwm'
     ports:
       - "1080:1080"
-    mem_limit: 512m
-    devices:
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
-      - MKNOD
-      - AUDIT_WRITE
-    sysctls:
-      - net.ipv4.ip_forward=1
-      - net.ipv4.conf.all.src_valid_mark=1
     environment:
       TZ: Asia/Shanghai
-      PROXY_PORT: 1080
-      FAMILIES_MODE: off
-      LOG_LEVEL: error
-      # WARP Monitor Configuration (optional, defaults shown)
-      # ENABLE_MONITOR: "true"
-      # MONITOR_INTERVAL: "5"
-      # MAX_CHECK_RETRIES: "3"
-      # RESTART_WAIT: "${WARP_SLEEP}"
-    # Optional: Persist WARP account data
-    # volumes:
-    #   - ./data:/var/lib/cloudflare-warp
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - warp-data:/etc/wireguard
 ```
 
 Start the container:
@@ -206,49 +114,22 @@ or for WARP+ users:
 warp=plus
 ```
 
-
-### Using Docker CLI
-
-```bash
-docker run -d \
-  --name cloudflare-warp \
-  --restart always \
-  --device /dev/net/tun \
-  --cap-add NET_ADMIN \
-  --cap-add MKNOD \
-  --cap-add AUDIT_WRITE \
-  --sysctl net.ipv4.ip_forward=1 \
-  --sysctl net.ipv4.conf.all.src_valid_mark=1 \
-  -e TZ=Asia/Shanghai \
-  -e PROXY_PORT=1080 \
-  -e FAMILIES_MODE=off \
-  # WARP Monitor Configuration (optional, defaults shown)
-  # -e ENABLE_MONITOR="true" \
-  # -e MONITOR_INTERVAL="5" \
-  # -e MAX_CHECK_RETRIES="3" \
-  # -e RESTART_WAIT="${WARP_SLEEP}" \
-  -p 1080:1080 \
-  zhengxiongzhao/warp-svc:latest
-```
-
 ---
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TZ` | `Asia/Shanghai` | Container timezone |
-| `PROXY_PORT` | `1080` | SOCKS5 proxy server port |
-| `LOG_LEVEL` | `error` | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` |
-| `FAMILIES_MODE` | `off` | DNS filtering mode:<br/>• `off` - No filtering<br/>• `malware` - Block malware<br/>• `full` - Block malware and adult content |
-| `WARP_LICENSE` | _(empty)_ | WARP+ license key for unlimited data |
-| `WARP_SLEEP` | `2` | Seconds to wait for warp-svc initialization |
-| `ENABLE_MONITOR` | `true` | Enable WARP process monitoring with automatic recovery |
-| `MONITOR_INTERVAL` | `5` | Monitoring check interval in seconds |
-| `MAX_CHECK_RETRIES` | `3` | Maximum consecutive failed checks before restarting warp-svc |
-| `RESTART_WAIT` | `${WARP_SLEEP}` | Wait time after restarting warp-svc before attempting to connect |
+    environment:
+      - BIND_ADDR=0.0.0.0     # Bind address
+      - BIND_PORT=1080        # Custom SOCKS5 port
+      - SOCKS_USER=admin      # Enable authentication
+      - SOCKS_PASS=123456     # Auth password
+      
+      # ⚠️ Port Hopping (Mitigating Datacenter QoS):
+      # If your VPS is in a datacenter (e.g., DMIT, AWS) where UDP 2408 is throttled or blocked,
+      # use port 4500 (standard IPsec NAT-T) to bypass restrictive firewall rules.
+      - ENDPOINT_IP=162.159.192.1:4500 
 
 ### Persistent Storage
 

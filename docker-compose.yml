@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   cloudflare-warp:
     # image: zhengxiongzhao/warp-svc:latest
@@ -6,21 +8,32 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
-    device_cgroup_rules:
-      - 'c 10:200 rwm'
     ports:
-      - 1080:1080
-    mem_limit: 512m
-    devices:
-      - /dev/net/tun
+      - "1080:1080"
     cap_add:
       - NET_ADMIN
-      - MKNOD
-      - AUDIT_WRITE
+      - SYS_MODULE
     sysctls:
-      - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
-    environment:
-      PROXY_PORT: 1080
-      FAMILIES_MODE: off
-      LOG_LEVEL: fatal
+    # environment:
+    #   - BIND_ADDR=0.0.0.0           # SOCKS5 监听地址，默认 0.0.0.0
+    #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
+    #   - SOCKS_USER=admin            # SOCKS5 认证用户名，留空则为无密码模式
+    #   - SOCKS_PASS=123456           # SOCKS5 认证密码，需与 SOCKS_USER 同时设置
+    #   - ENDPOINT_IP=162.159.192.1:4500  # 自定义 WARP 节点 IP，用于绕过 HK/US 机房的 CF reserved 字节阻断
+    #   - GH_PROXY=https://github.ednovas.xyz  # GitHub 代理前缀，仅用于加速 wgcf 二进制下载
+    #   - TAILSCALE_CIDR=100.64.0.0/10     # Tailscale 回程路由 CIDR，默认 100.64.0.0/10，非 Tailscale 场景无需设置
+    #   - MICROWARP_TEST_MODE=0       # 测试模式，设为 1 时跳过所有初始化逻辑，用于 CI/调试
+    
+    # 日志轮换限制，保留3个历史文件，每个最大3MB
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "3m"
+        max-file: "3"
+        
+    volumes:
+      - warp-data:/etc/wireguard
+
+volumes:
+  warp-data:
