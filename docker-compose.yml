@@ -10,9 +10,11 @@ services:
     restart: always
     ports:
       - "127.0.0.1:1080:1080"
+      - "[::1]:1080:1080"
     # environment:
-    #   - BIND_ADDR=0.0.0.0           # SOCKS5 监听地址，默认 0.0.0.0
+    #   - BIND_ADDR=::                # SOCKS5 监听地址，默认 ::，支持 IPv4/IPv6 双栈
     #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
+    #   - ENABLE_IPV6=1               # 启用 IPv6 出口和路由，默认 1；如需禁用可设为 0
     #   - SOCKS_USER=admin            # SOCKS5 认证用户名，留空则为无密码模式
     #   - SOCKS_PASS=123456           # SOCKS5 认证密码，需与 SOCKS_USER 同时设置
     #   - ENDPOINT_IP=162.159.192.1:4500  # 自定义 WARP 节点 IP，用于绕过 HK/US 机房的 CF reserved 字节阻断
@@ -24,6 +26,8 @@ services:
       - SYS_MODULE
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
     ulimits:
       nofile:
         soft: 65536

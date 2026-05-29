@@ -71,8 +71,11 @@ fi
 # 2. 配置清洗与参数注入
 # ==========================================
 
-# 提取纯 IPv4 地址
-IPV4_ADDR=$(grep '^Address' "$WG_CONF" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' | head -n 1)
+# 提取 WARP 分配的 IPv4/IPv6 地址
+ADDRESS_LINE=$(grep '^Address' "$WG_CONF" | head -n 1 || true)
+IPV4_ADDR=$(printf '%s\n' "$ADDRESS_LINE" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' | head -n 1 || true)
+IPV6_ADDR=$(printf '%s\n' "$ADDRESS_LINE" | tr ',' '\n' | grep ':' | grep -oE '[0-9A-Fa-f:]+/[0-9]{1,3}' | head -n 1 || true)
+ENABLE_IPV6=${ENABLE_IPV6:-1}
 
 # 清除旧配置
 sed -i '/^Address/d' "$WG_CONF"
@@ -81,15 +84,33 @@ sed -i '/^DNS.*/d' "$WG_CONF"
 sed -i '/^[Mm][Tt][Uu].*/d' "$WG_CONF"
 
 # 注入新配置
+ADDRESS_LIST=""
 if [ -n "$IPV4_ADDR" ]; then
-    sed -i "/\[Interface\]/a Address = $IPV4_ADDR" "$WG_CONF"
+    ADDRESS_LIST="$IPV4_ADDR"
+fi
+if [ "$ENABLE_IPV6" = "1" ] && [ -n "$IPV6_ADDR" ]; then
+    if [ -n "$ADDRESS_LIST" ]; then
+        ADDRESS_LIST="$ADDRESS_LIST, $IPV6_ADDR"
+    else
+        ADDRESS_LIST="$IPV6_ADDR"
+    fi
+fi
+if [ -n "$ADDRESS_LIST" ]; then
+    sed -i "/\[Interface\]/a Address = $ADDRESS_LIST" "$WG_CONF"
+    echo "==> [MicroWARP] WireGuard 地址已设置为: $ADDRESS_LIST"
 fi
 
 WG_MTU=${MTU:-1280}
 sed -i "/\[Interface\]/a MTU = $WG_MTU" "$WG_CONF"
 echo "==> [MicroWARP] MTU 值已设置为: $WG_MTU"
 
-sed -i "/\[Peer\]/a AllowedIPs = 0.0.0.0\/0" "$WG_CONF"
+if [ "$ENABLE_IPV6" = "1" ] && [ -n "$IPV6_ADDR" ]; then
+    sed -i "/\[Peer\]/a AllowedIPs = 0.0.0.0\/0, ::\/0" "$WG_CONF"
+    echo "==> [MicroWARP] 已启用 IPv4/IPv6 双栈代理路由"
+else
+    sed -i "/\[Peer\]/a AllowedIPs = 0.0.0.0\/0" "$WG_CONF"
+    echo "==> [MicroWARP] 已启用 IPv4 代理路由"
+fi
 
 # 删除 Alpine 系统自带 wg-quick 中不兼容的路由标记
 sed -i '/src_valid_mark/d' /usr/bin/wg-quick
@@ -114,13 +135,42 @@ DEFAULT_ENDPOINT_PORTS="2408 500 4500 1701 4443 8443 51820"
 ENDPOINT_IPS="${ENDPOINT_IPS:-$DEFAULT_ENDPOINT_IPS}"
 ENDPOINT_PORTS="${ENDPOINT_PORTS:-$DEFAULT_ENDPOINT_PORTS}"
 ENDPOINT_TEST_TIMEOUT="${ENDPOINT_TEST_TIMEOUT:-8}"
+ENDPOINT_READY_RETRIES="${ENDPOINT_READY_RETRIES:-5}"
+ENDPOINT_READY_INTERVAL="${ENDPOINT_READY_INTERVAL:-3}"
 ENDPOINT_AUTO="${ENDPOINT_AUTO:-1}"
+
+# 格式化 Endpoint，IPv6 地址需要使用 [addr]:port 格式
+format_wg_endpoint() {
+    local ip="$1"
+    local port="$2"
+    case "$ip" in
+        *:*) echo "[${ip}]:${port}" ;;
+        *) echo "${ip}:${port}" ;;
+    esac
+}
 
 # 设置 wg0.conf 的 Endpoint
 set_wg_endpoint() {
     local ip="$1"
     local port="$2"
-    sed -i "s/^Endpoint.*/Endpoint = ${ip}:${port}/g" "$WG_CONF"
+    local endpoint
+    endpoint=$(format_wg_endpoint "$ip" "$port")
+    sed -i "s/^Endpoint.*/Endpoint = ${endpoint}/g" "$WG_CONF"
+}
+
+# 解析手动指定的 ENDPOINT_IP，支持 IPv4:port、hostname:port 和 [IPv6]:port
+parse_manual_endpoint() {
+    local endpoint="$1"
+    case "$endpoint" in
+        \[*\]:*)
+            MANUAL_ENDPOINT_HOST=$(printf '%s\n' "$endpoint" | sed 's/^\[\(.*\)\]:[^:]*$/\1/')
+            MANUAL_ENDPOINT_PORT=$(printf '%s\n' "$endpoint" | sed 's/^\[.*\]:\([^:]*\)$/\1/')
+            ;;
+        *)
+            MANUAL_ENDPOINT_HOST=$(printf '%s\n' "$endpoint" | sed 's/:\([^:]*\)$/\n\1/' | sed -n '1p')
+            MANUAL_ENDPOINT_PORT=$(printf '%s\n' "$endpoint" | sed 's/.*://')
+            ;;
+    esac
 }
 
 # 检查 wg0 是否已有握手或接收字节
@@ -139,6 +189,16 @@ wg_has_handshake() {
     return 1
 }
 
+# 检查 WARP IPv4 数据面是否可用
+warp_ipv4_ready() {
+    curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace | grep -q '^warp='
+}
+
+# 检查 WARP IPv6 数据面是否可用
+warp_ipv6_ready() {
+    curl -6 -s -m 5 'https://[2606:4700:4700::1111]/cdn-cgi/trace' | grep -q '^warp='
+}
+
 # 尝试单个 Endpoint，成功返回 0，失败返回 1
 try_wg_endpoint() {
     local ip="$1"
@@ -149,20 +209,33 @@ try_wg_endpoint() {
     # 启动 wg0
     wg-quick up wg0 > /dev/null 2>&1 || return 1
 
-    # 等待握手
+    # 等待握手。握手只代表 WireGuard 控制面成功，不代表隧道数据面已经可用。
     local waited=0
     while [ "$waited" -lt "$ENDPOINT_TEST_TIMEOUT" ]; do
         sleep 1
         waited=$((waited + 1))
         if wg_has_handshake; then
-            echo "==> [MicroWARP] ✅ Endpoint ${ip}:${port} 握手成功 (耗时 ${waited}s)"
-            return 0
+            echo "==> [MicroWARP] Endpoint ${ip}:${port} 握手成功 (耗时 ${waited}s)，继续检测 IPv4 数据面..."
+            local ready_attempt=0
+            while [ "$ready_attempt" -lt "$ENDPOINT_READY_RETRIES" ]; do
+                ready_attempt=$((ready_attempt + 1))
+                if warp_ipv4_ready; then
+                    echo "==> [MicroWARP] ✅ Endpoint ${ip}:${port} IPv4 数据面可用 (第 ${ready_attempt} 次检测成功)"
+                    return 0
+                fi
+                echo "==> [MicroWARP] Endpoint ${ip}:${port} IPv4 数据面暂不可用，等待 ${ENDPOINT_READY_INTERVAL}s 后重试 (${ready_attempt}/${ENDPOINT_READY_RETRIES})..."
+                sleep "$ENDPOINT_READY_INTERVAL"
+            done
+
+            wg-quick down wg0 > /dev/null 2>&1 || true
+            echo "==> [MicroWARP] ❌ Endpoint ${ip}:${port} 握手成功但 IPv4 数据面不可用，尝试下一个..."
+            return 1
         fi
     done
 
     # 超时，关闭 wg0
     wg-quick down wg0 > /dev/null 2>&1 || true
-    echo "==> [MicroWARP] ❌ Endpoint ${ip}:${port} 超时，尝试下一个..."
+    echo "==> [MicroWARP] ❌ Endpoint ${ip}:${port} 握手超时，尝试下一个..."
     return 1
 }
 
@@ -171,7 +244,8 @@ select_and_start_warp_endpoint() {
     # 如果用户手动指定了 ENDPOINT_IP，则直接使用，跳过自动优选
     if [ -n "$ENDPOINT_IP" ]; then
         echo "==> [MicroWARP] 检测到手动指定 ENDPOINT_IP: $ENDPOINT_IP，跳过自动优选"
-        set_wg_endpoint "$(echo "$ENDPOINT_IP" | cut -d: -f1)" "$(echo "$ENDPOINT_IP" | cut -d: -f2)"
+        parse_manual_endpoint "$ENDPOINT_IP"
+        set_wg_endpoint "$MANUAL_ENDPOINT_HOST" "$MANUAL_ENDPOINT_PORT"
         echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
         wg-quick up wg0 > /dev/null 2>&1
         return 0
@@ -202,6 +276,25 @@ select_and_start_warp_endpoint() {
     return 1
 }
 
+# 在 WARP 改写默认路由前记录原始回程路径、主网卡 IP 和网关
+PRE_WARP_ROUTE=$(ip route get 100.64.0.1 2>/dev/null | head -n 1 || true)
+PRE_WARP_GW=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}')
+PRE_WARP_DEV=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}')
+
+ORIG_GW=$(ip -4 route show default 2>/dev/null | awk '{print $3}' | head -n 1)
+ORIG_DEV=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n 1)
+if [ -n "$ORIG_DEV" ]; then
+    ORIG_IP=$(ip -4 addr show dev "$ORIG_DEV" | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)
+fi
+
+if [ "$ENABLE_IPV6" = "1" ]; then
+    ORIG_GW6=$(ip -6 route show default 2>/dev/null | awk '{print $3}' | head -n 1)
+    ORIG_DEV6=$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -n 1)
+    if [ -n "$ORIG_DEV6" ]; then
+        ORIG_IP6=$(ip -6 addr show dev "$ORIG_DEV6" scope global 2>/dev/null | awk '/inet6 / {print $2}' | cut -d/ -f1 | head -n 1)
+    fi
+fi
+
 # 执行 Endpoint 选择并启动 wg0
 select_and_start_warp_endpoint
 
@@ -209,23 +302,19 @@ select_and_start_warp_endpoint
 # 4. 修复非对称路由
 # ==========================================
 
-# 记录原始回程路径
-PRE_WARP_ROUTE=$(ip route get 100.64.0.1 2>/dev/null | head -n 1 || true)
-PRE_WARP_GW=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}')
-PRE_WARP_DEV=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}')
-
-# 记录当前容器主网卡 IP 和网关
-ORIG_GW=$(ip -4 route show default | awk '{print $3}' | head -n 1)
-ORIG_DEV=$(ip -4 route show default | awk '{print $5}' | head -n 1)
-if [ -n "$ORIG_DEV" ]; then
-    ORIG_IP=$(ip -4 addr show dev "$ORIG_DEV" | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)
-fi
-
 # 注入源地址策略路由修复非对称路由
 if [ -n "$ORIG_IP" ] && [ -n "$ORIG_GW" ] && [ -n "$ORIG_DEV" ]; then
-    echo "==> [MicroWARP] 正在注入策略路由修复非对称路由 (源IP: $ORIG_IP)..."
+    echo "==> [MicroWARP] 正在注入 IPv4 策略路由修复非对称路由 (源IP: $ORIG_IP)..."
     ip rule add from "$ORIG_IP" table 128 priority 100 2>/dev/null || true
     ip route add table 128 default via "$ORIG_GW" dev "$ORIG_DEV" 2>/dev/null || true
+fi
+
+if [ "$ENABLE_IPV6" = "1" ] && [ -n "$ORIG_IP6" ] && [ -n "$ORIG_GW6" ] && [ -n "$ORIG_DEV6" ]; then
+    echo "==> [MicroWARP] 正在注入 IPv6 策略路由修复非对称路由 (源IP: $ORIG_IP6)..."
+    sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.forwarding=1 > /dev/null 2>&1 || true
+    ip -6 rule add from "$ORIG_IP6" table 129 priority 110 2>/dev/null || true
+    ip -6 route add table 129 default via "$ORIG_GW6" dev "$ORIG_DEV6" 2>/dev/null || true
 fi
 
 # 恢复 Tailscale 等内网网段的回程路由
@@ -236,13 +325,37 @@ if [ -n "$PRE_WARP_GW" ] && [ -n "$PRE_WARP_DEV" ]; then
     fi
 fi
 
-echo "==> [MicroWARP] 当前出口 IP 已成功变更为："
-curl -s -m 5 https://1.1.1.1/cdn-cgi/trace | grep ip= || echo "⚠️ 获取超时 (可能是底层握手延迟或节点被强阻断)"
+print_exit_ip_with_retry() {
+    local family="$1"
+    local url="$2"
+    local attempt=0
+    local output=""
+
+    while [ "$attempt" -lt "$ENDPOINT_READY_RETRIES" ]; do
+        attempt=$((attempt + 1))
+        output=$(curl "$family" -s -m 5 "$url" 2>/dev/null || true)
+        if printf '%s\n' "$output" | grep -q '^ip='; then
+            printf '%s\n' "$output" | grep '^ip='
+            return 0
+        fi
+        echo "==> [MicroWARP] 出口 IP 获取暂不可用，等待 ${ENDPOINT_READY_INTERVAL}s 后重试 (${attempt}/${ENDPOINT_READY_RETRIES})..."
+        sleep "$ENDPOINT_READY_INTERVAL"
+    done
+
+    return 1
+}
+
+echo "==> [MicroWARP] 当前 IPv4 出口 IP 已成功变更为："
+print_exit_ip_with_retry -4 https://1.1.1.1/cdn-cgi/trace || echo "⚠️ IPv4 获取超时 (可能是节点数据面尚未就绪或节点被强阻断)"
+if [ "$ENABLE_IPV6" = "1" ]; then
+    echo "==> [MicroWARP] 当前 IPv6 出口 IP 已成功变更为："
+    print_exit_ip_with_retry -6 'https://[2606:4700:4700::1111]/cdn-cgi/trace' || echo "⚠️ IPv6 获取超时 (可能是宿主机/Docker 未启用 IPv6、节点握手延迟或 IPv6 数据面暂不可用)"
+fi
 
 # ==========================================
 # 5. 启动 SOCKS5 代理服务
 # ==========================================
-LISTEN_ADDR=${BIND_ADDR:-"0.0.0.0"}
+LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
 if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
