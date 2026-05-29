@@ -358,12 +358,19 @@ fi
 LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
+# 根据 DEBUG 环境变量决定是否启用静默模式（默认静默）
+if [ "${DEBUG:-false}" = "true" ]; then
+    QUIET_FLAG=""
+else
+    QUIET_FLAG="-q"
+fi
+
 if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
     echo "==> [MicroWARP] 身份认证已开启 (User: $SOCKS_USER)"
     echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
-    exec microsocks -i "$LISTEN_ADDR" -p "$LISTEN_PORT" -u "$SOCKS_USER" -P "$SOCKS_PASS"
+    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT" -u "$SOCKS_USER" -P "$SOCKS_PASS"
 else
     echo "==> [MicroWARP] 未设置密码，当前为公开访问模式"
     echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
-    exec microsocks -i "$LISTEN_ADDR" -p "$LISTEN_PORT"
+    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT"
 fi
