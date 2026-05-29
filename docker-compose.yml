@@ -2,38 +2,42 @@ version: '3.8'
 
 services:
   cloudflare-warp:
-    # image: zhengxiongzhao/warp-svc:latest
     container_name: cloudflare-warp
     build:
       context: .
       dockerfile: Dockerfile
     restart: always
     ports:
-      - "1080:1080"
+      - "127.0.0.1:1080:1080"
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
-    # environment:
-    #   - BIND_ADDR=0.0.0.0           # SOCKS5 监听地址，默认 0.0.0.0
-    #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
-    #   - SOCKS_USER=admin            # SOCKS5 认证用户名，留空则为无密码模式
-    #   - SOCKS_PASS=123456           # SOCKS5 认证密码，需与 SOCKS_USER 同时设置
-    #   - ENDPOINT_IP=162.159.192.1:4500  # 自定义 WARP 节点 IP，用于绕过 HK/US 机房的 CF reserved 字节阻断
-    #   - GH_PROXY=https://github.ednovas.xyz  # GitHub 代理前缀，仅用于加速 wgcf 二进制下载
-    #   - TAILSCALE_CIDR=100.64.0.0/10     # Tailscale 回程路由 CIDR，默认 100.64.0.0/10，非 Tailscale 场景无需设置
-    #   - MICROWARP_TEST_MODE=0       # 测试模式，设为 1 时跳过所有初始化逻辑，用于 CI/调试
-    
-    # 日志轮换限制，保留3个历史文件，每个最大3MB
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      - BIND_ADDR=0.0.0.0
+      - BIND_PORT=1080
+      # 手动指定 Endpoint（最高优先级，设置后跳过自动优选）
+      # - ENDPOINT_IP=162.159.192.1:2408
+      # 自动优选开关（默认启用）
+      # - ENDPOINT_AUTO=1
+      # 自定义候选 IP 列表（空格分隔，默认使用内置 WARP 核心段 + Cloudflare Anycast 抽样）
+      # - ENDPOINT_IPS=162.159.192.1 162.159.193.1 162.159.193.5 162.159.194.1 162.159.195.1 162.159.196.1 162.159.197.1 104.16.0.1 104.24.0.1 172.64.0.1 162.158.0.1
+      # 自定义候选端口（空格分隔）
+      # - ENDPOINT_PORTS=2408 500 4500 1701 4443 8443 51820
+      # 每个 Endpoint 握手测试超时（秒）
+      # - ENDPOINT_TEST_TIMEOUT=8
     logging:
       driver: "json-file"
       options:
         max-size: "3m"
         max-file: "3"
-        
-    volumes:
-      - warp-data:/etc/wireguard
+    # volumes:
+    #   - warp-data:/etc/wireguard
 
 volumes:
   warp-data:
