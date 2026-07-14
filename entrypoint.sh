@@ -29,6 +29,9 @@ fi
 WG_CONF="/etc/wireguard/wg0.conf"
 mkdir -p /etc/wireguard
 
+# 将 warp_register.sh 复制到 /etc/wireguard，方便用户在本地生成配置
+cp -f /app/warp_register.sh /etc/wireguard/warp_register.sh
+
 # ==========================================
 # 1. 账号全自动申请与配置生成 (阅后即焚)
 # ==========================================
@@ -52,8 +55,48 @@ if [ ! -f "$WG_CONF" ]; then
     wget --timeout=15 -qO wgcf "$(build_wgcf_download_url "$WGCF_VER" "$WGCF_ARCH")"
     chmod +x wgcf
 
-    echo "==> [MicroWARP] 正在向 CF 注册设备..."
-    ./wgcf register --accept-tos > /dev/null
+    # 注册重试逻辑：最多 3 次，指数退避 30s -> 60s
+    MAX_REGISTER_RETRIES=3
+    register_attempt=0
+    register_success=false
+    register_delay=30
+
+    while [ "$register_attempt" -lt "$MAX_REGISTER_RETRIES" ]; do
+        register_attempt=$((register_attempt + 1))
+        echo "==> [MicroWARP] 正在向 CF 注册设备 (${register_attempt}/${MAX_REGISTER_RETRIES})..."
+
+        if ./wgcf register --accept-tos > /dev/null 2>&1; then
+            register_success=true
+            break
+        fi
+
+        if [ "$register_attempt" -lt "$MAX_REGISTER_RETRIES" ]; then
+            echo "==> [MicroWARP] 注册失败，${register_delay} 秒后重试..."
+            sleep "$register_delay"
+            register_delay=$((register_delay * 2))
+        fi
+    done
+
+    if [ "$register_success" = "false" ]; then
+        # 获取当前 VPS 出口 IP
+        CURRENT_IP=$(curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep '^ip=' | cut -d= -f2 || true)
+
+        echo ""
+        echo "==> [ERROR] =========================================="
+        echo "==> [ERROR] WARP 设备注册失败（已重试 ${MAX_REGISTER_RETRIES} 次）"
+        echo "==> [ERROR] 当前 VPS 出口 IP: ${CURRENT_IP:-未知}"
+        echo "==> [ERROR] 该 IP 地址（通常是数据中心/机房 IP 段）向 Cloudflare 接口请求注册 WARP 设备的频率过高"
+        echo "==> [ERROR] =========================================="
+        echo ""
+        echo "==> [解决方案] 请在本地生成 wg0.conf 并挂载到容器后重启："
+        echo "   1. 修改 docker-compose.yml 挂载卷: ./warp-data:/etc/wireguard"
+        echo "   2. 执行: curl -Lso- zxzhao.com/t/warp_register.sh | bash"
+        echo "   3. 将 wg0.conf 上传到 ./warp-data "
+        echo ""
+        echo "==> [MicroWARP] 容器将在 1 小时后退出，请在此期间完成配置..."
+        sleep 3600
+        exit 1
+    fi
 
     echo "==> [MicroWARP] 正在生成 WireGuard 配置文件..."
     ./wgcf generate > /dev/null

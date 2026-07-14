@@ -21,6 +21,7 @@ COPY --from=builder /src/microsocks /usr/local/bin/microsocks
 
 WORKDIR /app
 COPY entrypoint.sh .
+COPY warp_register.sh .
 RUN chmod +x entrypoint.sh
 
 # 启动引擎

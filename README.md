@@ -122,6 +122,47 @@ warp=plus
 
 ---
 
+## Troubleshooting: Manual WARP Config Generation
+
+If the container logs show WARP registration failures (typically caused by datacenter IP rate limiting by Cloudflare), you can generate the WireGuard config on your local machine and mount it into the container.
+
+### Step 1: Generate `wg0.conf` locally
+
+Run the one-liner script on your **local machine** (supports Linux/macOS):
+
+```bash
+curl -Lso- zxzhao.com/t/warp_register.sh | bash
+```
+
+This will:
+- Auto-detect your OS and CPU architecture
+- Download the latest `wgcf` binary
+- Register a WARP device and generate `wgcf-profile.conf`
+- Rename it to `wg0.conf`
+
+### Step 2: Upload `wg0.conf` to your VPS
+
+```bash
+scp wg0.conf user@your-vps:/path/to/project/warp-data/wg0.conf
+```
+
+### Step 3: Enable volume mount in `docker-compose.yml`
+
+Uncomment or add the `volumes` section:
+
+```yaml
+    volumes:
+      - ./warp-data:/etc/wireguard
+```
+
+### Step 4: Restart the container
+
+```bash
+docker-compose restart
+```
+
+---
+
 ## Configuration
 
 ### Environment Variables
@@ -136,7 +177,7 @@ warp=plus
       # ⚠️ Port Hopping (Mitigating Datacenter QoS):
       # If your VPS is in a datacenter (e.g., DMIT, AWS) where UDP 2408 is throttled or blocked,
       # use port 4500 (standard IPsec NAT-T) to bypass restrictive firewall rules.
-      - ENDPOINT_IP=162.159.192.1:4500 
+      # - ENDPOINT_IP=162.159.192.1:4500 
 
 ### IPv6 Dual-stack
 
