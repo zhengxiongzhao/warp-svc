@@ -173,6 +173,7 @@ docker-compose restart
       - ENABLE_IPV6=1         # Enable IPv6 routing and IPv6 egress, default 1
       - SOCKS_USER=admin      # Enable authentication
       - SOCKS_PASS=123456     # Auth password
+      - LOG_LEVEL=error       # gost log level: fatal/error/warn/info/debug/trace, default error (auto: debug when DEBUG=true)
       
       # ⚠️ Port Hopping (Mitigating Datacenter QoS):
       # If your VPS is in a datacenter (e.g., DMIT, AWS) where UDP 2408 is throttled or blocked,

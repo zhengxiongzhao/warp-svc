@@ -401,14 +401,19 @@ fi
 LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
-# 根据 DEBUG 环境变量决定日志详细程度
-# 注意：gost v3 的 -O 是「配置转储并退出」模式（yaml|json），不是日志控制；
-#       gost v3 默认即为前台守护运行，无需额外标志即可保持前台不退出。
-if [ "${DEBUG:-false}" = "true" ]; then
-    LOG_FLAG="-D"
-else
-    LOG_FLAG=""
+# 解析 gost 日志级别（通过 gost 原生环境变量 GOST_LOGGER_LEVEL 控制）
+# 优先级：显式 LOG_LEVEL > DEBUG=true(debug) > 默认 error
+# 可选值（由低到高）：fatal error warn info debug trace
+# 注意：gost v3 默认即为前台守护运行，无需额外命令行标志即可保持前台不退出。
+GOST_LOG_LEVEL="${LOG_LEVEL:-}"
+if [ -z "$GOST_LOG_LEVEL" ]; then
+    if [ "${DEBUG:-false}" = "true" ]; then
+        GOST_LOG_LEVEL="debug"
+    else
+        GOST_LOG_LEVEL="error"
+    fi
 fi
+export GOST_LOGGER_LEVEL="$GOST_LOG_LEVEL"
 
 # 将监听地址格式化为 gost URL 中的 host 部分
 # - IPv6 地址（含冒号）必须用方括号包裹：[::] / [2001:db8::1]
@@ -445,5 +450,5 @@ else
     echo "==> [MicroWARP] 未设置密码，当前为公开访问模式"
 fi
 
-echo "==> [MicroWARP] gost 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
-exec gost $LOG_FLAG -L "$GOST_LISTEN"
+echo "==> [MicroWARP] gost 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT} (日志级别: ${GOST_LOG_LEVEL})"
+exec gost -L "$GOST_LISTEN"

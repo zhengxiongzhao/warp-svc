@@ -1,0 +1,1 @@
+rsync -avz . root@u0:/usr/local/deploy/warp/ --exclude=.git 

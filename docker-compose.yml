@@ -9,8 +9,7 @@ services:
       dockerfile: Dockerfile
     restart: always
     ports:
-      - "127.0.0.1:1080:1080"
-      - "[::1]:1080:1080"
+      - "1080:1080"
     # environment:
     #   - BIND_ADDR=::                # SOCKS5 监听地址，默认 ::，支持 IPv4/IPv6 双栈
     #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
@@ -20,6 +19,7 @@ services:
     #   - ENDPOINT_IP=162.159.192.1:4500  # 自定义 WARP 节点 IP，用于绕过 HK/US 机房的 CF reserved 字节阻断
     #   - GH_PROXY=https://github.ednovas.xyz  # GitHub 代理前缀，仅用于加速 wgcf 二进制下载
     #   - TAILSCALE_CIDR=100.64.0.0/10     # Tailscale 回程路由 CIDR，默认 100.64.0.0/10，非 Tailscale 场景无需设置
+    #   - LOG_LEVEL=error             # gost 日志级别：fatal/error/warn/info/debug/trace，默认 error；DEBUG=true 时自动降为 debug
     #   - MICROWARP_TEST_MODE=0       # 测试模式，设为 1 时跳过所有初始化逻辑，用于 CI/调试
     cap_add:
       - NET_ADMIN
