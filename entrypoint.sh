@@ -401,12 +401,13 @@ fi
 LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
-# 根据 DEBUG 环境变量决定是否启用静默模式（默认静默）
-# gost 通过 -O none 关闭所有日志输出，等价于 microsocks 的 -q
+# 根据 DEBUG 环境变量决定日志详细程度
+# 注意：gost v3 的 -O 是「配置转储并退出」模式（yaml|json），不是日志控制；
+#       gost v3 默认即为前台守护运行，无需额外标志即可保持前台不退出。
 if [ "${DEBUG:-false}" = "true" ]; then
-    LOG_FLAG=""
+    LOG_FLAG="-D"
 else
-    LOG_FLAG="-O none"
+    LOG_FLAG=""
 fi
 
 # 将监听地址格式化为 gost URL 中的 host 部分
