@@ -1,7 +1,10 @@
 name: Build Docker Image
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+      - '*.*.*'
 
 jobs:
   buildx:
@@ -27,9 +30,11 @@ jobs:
       - name: Set Version
         id: set-version
         run: |
-          echo "::set-output name=version::$(date +"%Y%m%d")"
-          echo $(date +"%Y%m%d")
-          echo "::set-output name=status::success"
+          VERSION="${GITHUB_REF_NAME}"
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "status=success" >> "${GITHUB_OUTPUT}"
+          echo "Docker image version: ${VERSION}"
 
       # Build and push
 
