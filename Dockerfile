@@ -3,31 +3,31 @@ ARG BASE_IMAGE=debian:stable-slim
 FROM ${BASE_IMAGE}
 
 ARG WARP_VERSION=2025.10.186.0
-ARG GOST_VERSION=2.12.0
+ARG GOST_VERSION=3.0.0
 ARG TARGETPLATFORM
 ARG COMMIT_SHA
+ARG GH_PROXY
 
 LABEL WARP_VERSION=${WARP_VERSION}
 LABEL GOST_VERSION=${GOST_VERSION}
 LABEL COMMIT_SHA=${COMMIT_SHA}
 
-ENV PROXY_PORT=1080 \
-    TZ=Asia/Shanghai \
-    LOG_LEVEL=error \
-    WARP_SLEEP=5 \
-    FAMILIES_MODE=off \
-    WARP_LICENSE=
+ENV TZ=Asia/Shanghai \
+    WARP_SLEEP=2 \
+    WARP_LICENSE= \
+    BIND_ADDR=:: \
+    BIND_PORT=1080 \
+    SOCKS_USER= \
+    SOCKS_PASS= \
+    LOG_LEVEL=error
 
 COPY entrypoint.sh /entrypoint.sh
 COPY ./scripts /healthcheck
 
-# install dependencies
-RUN case ${TARGETPLATFORM} in \
-      "linux/amd64")   export ARCH="amd64" ;; \
-      "linux/arm64")   export ARCH="armv8" ;; \
-      *) echo "Unsupported TARGETPLATFORM: ${TARGETPLATFORM}" && exit 1 ;; \
-    esac && \
-    echo "Building for ${TARGETPLATFORM} with GOST ${GOST_VERSION}" &&\
+# install dependencies and download gost
+# NOTE: WARP apt repo uses "armv8" for arm64, but gost releases use "arm64".
+# To avoid the naming mismatch, WARP keeps TARGETPLATFORM while gost uses uname -m.
+RUN set -eux && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y curl gnupg lsb-release sudo jq ipcalc && \
@@ -37,30 +37,23 @@ RUN case ${TARGETPLATFORM} in \
     apt-get install -y cloudflare-warp && \
     apt-get clean && \
     apt-get autoremove -y && \
-    MAJOR_VERSION=$(echo ${GOST_VERSION} | cut -d. -f1) && \
-    MINOR_VERSION=$(echo ${GOST_VERSION} | cut -d. -f2) && \
-    # detect if version >= 2.12.0, which uses new filename syntax
-    if [ "${MAJOR_VERSION}" -ge 3 ] || [ "${MAJOR_VERSION}" -eq 2 -a "${MINOR_VERSION}" -ge 12 ]; then \
-      NAME_SYNTAX="new" && \
-      if [ "${TARGETPLATFORM}" = "linux/arm64" ]; then \
-        ARCH="arm64"; \
-      fi && \
-      FILE_NAME="gost_${GOST_VERSION}_linux_${ARCH}.tar.gz"; \
-    else \
-      NAME_SYNTAX="legacy" && \
-      FILE_NAME="gost-linux-${ARCH}-${GOST_VERSION}.gz"; \
-    fi && \
-    echo "File name: ${FILE_NAME}" && \
-    curl -LO https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${FILE_NAME} && \
-    if [ "${NAME_SYNTAX}" = "new" ]; then \
-      tar -xzf ${FILE_NAME} -C /usr/bin/ gost; \
-    else \
-      gunzip ${FILE_NAME} && \
-      mv gost-linux-${ARCH}-${GOST_VERSION} /usr/bin/gost; \
-    fi && \
-    chmod +x /usr/bin/gost && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64)  GOST_ARCH="amd64" ;; \
+        aarch64) GOST_ARCH="arm64" ;; \
+        *) echo "Unsupported ARCH: $ARCH"; exit 1 ;; \
+    esac && \
+    GOST_VER=$(curl -sL "https://api.github.com/repos/go-gost/gost/releases/latest" \
+        | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/') && \
+    [ -n "$GOST_VER" ] || GOST_VER="${GOST_VERSION:-3.0.0}" && \
+    echo "Downloading gost v${GOST_VER} (linux_${GOST_ARCH})" && \
+    RAW_URL="https://github.com/go-gost/gost/releases/download/v${GOST_VER}/gost_${GOST_VER}_linux_${GOST_ARCH}.tar.gz" && \
+    DOWNLOAD_URL="${GH_PROXY:+${GH_PROXY%/}/}${RAW_URL}" && \
+    curl -fsSL "$DOWNLOAD_URL" | tar -xz -C /usr/local/bin gost && \
+    chmod +x /usr/local/bin/gost && \
     chmod +x /entrypoint.sh && \
     chmod +x /healthcheck/index.sh && \
+    chmod +x /healthcheck/warp-monitor.sh && \
     useradd -m -s /bin/bash warp && \
     echo "warp ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/warp
 
@@ -73,6 +66,12 @@ RUN mkdir -p /home/warp/.local/share/warp && \
 ENV REGISTER_WHEN_MDM_EXISTS=
 ENV BETA_FIX_HOST_CONNECTIVITY=
 ENV WARP_ENABLE_NAT=
+
+# Self-healing: monitor WARP connectivity and restart the container when
+# the tunnel is down for too long. Enabled by default.
+ENV WARP_AUTO_RESTART=1
+ENV WARP_MONITOR_INTERVAL=30
+ENV WARP_MONITOR_RETRIES=5
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD /healthcheck/index.sh

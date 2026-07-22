@@ -3,7 +3,7 @@
 [![Publish Docker image to Docker Hub](https://img.shields.io/badge/Publish%20Docker%20image%20to%20Docker%20Hub-latest-g?logo=docker)](https://hub.docker.com/r/zhengxiongzhao/warp-svc)
 [![Docker Pulls](https://img.shields.io/docker/pulls/zhengxiongzhao/warp-svc)](https://hub.docker.com/r/zhengxiongzhao/warp-svc)
 
-> **Built with the latest version of `warp-svc`, version: 2025.9.558.0**
+> **Built with the latest version of `warp-svc`, version: 2025.10.186.0**
 
 > **⚠️ Requirement: International network access is required !**
 
@@ -15,16 +15,16 @@ This Docker image packages the official Cloudflare WARP client for Linux and pro
 - Local machine applications
 - Other Docker containers via docker-compose
 
-**Why this project?** The official Cloudflare WARP client for Linux only listens on localhost, making it unusable in Docker containers that need to bind to 0.0.0.0. This image solves that problem by using `gost` to forward traffic.
+**Why this project?** The official Cloudflare WARP client for Linux only listens on localhost, making it unusable in Docker containers that need to bind to 0.0.0.0. This image solves that problem by using `gost` (v3) to forward traffic.
 
 ---
 
 ## Features
 
-✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically  
-🛡️ **Families Mode** - Configurable DNS filtering (off/malware/full)  
-⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data  
-🔄 **Health Monitoring** - Built-in health checks with automatic recovery  
+✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically
+⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data
+🔄 **Health Monitoring** - Built-in health checks with automatic recovery
+🔧 **Self-Healing** - Optional auto-restart when WARP tunnel goes down
 🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms
 
 ---
@@ -102,9 +102,10 @@ services:
       - net.ipv4.conf.all.src_valid_mark=1
     environment:
       TZ: Asia/Shanghai
-      PROXY_PORT: 1080
-      FAMILIES_MODE: off
+      BIND_PORT: 1080
       LOG_LEVEL: error
+      # SOCKS_USER: admin       # optional: enable SOCKS5 auth
+      # SOCKS_PASS: 123456      # requires SOCKS_USER
     # Optional: Persist WARP account data
     # volumes:
     #   - ./data:/var/lib/cloudflare-warp
@@ -146,8 +147,7 @@ docker run -d \
   --sysctl net.ipv4.ip_forward=1 \
   --sysctl net.ipv4.conf.all.src_valid_mark=1 \
   -e TZ=Asia/Shanghai \
-  -e PROXY_PORT=1080 \
-  -e FAMILIES_MODE=off \
+  -e BIND_PORT=1080 \
   -p 1080:1080 \
   zhengxiongzhao/warp-svc:latest
 ```
@@ -161,11 +161,16 @@ docker run -d \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `Asia/Shanghai` | Container timezone |
-| `PROXY_PORT` | `1080` | SOCKS5 proxy server port |
-| `LOG_LEVEL` | `error` | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` |
-| `FAMILIES_MODE` | `off` | DNS filtering mode:<br/>• `off` - No filtering<br/>• `malware` - Block malware<br/>• `full` - Block malware and adult content |
-| `WARP_LICENSE` | _(empty)_ | WARP+ license key for unlimited data |
 | `WARP_SLEEP` | `2` | Seconds to wait for warp-svc initialization |
+| `WARP_LICENSE` | _(empty)_ | WARP+ license key for unlimited data |
+| `BIND_ADDR` | `::` | SOCKS5 bind address, `::` for IPv4/IPv6 dual-stack |
+| `BIND_PORT` | `1080` | SOCKS5 listen port |
+| `SOCKS_USER` | _(empty)_ | SOCKS5 authentication username, empty = no auth |
+| `SOCKS_PASS` | _(empty)_ | SOCKS5 authentication password, requires `SOCKS_USER` |
+| `LOG_LEVEL` | `error` | gost log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` |
+| `WARP_AUTO_RESTART` | `1` | Set to empty to disable self-healing: auto-restart container when WARP tunnel is down |
+| `WARP_MONITOR_INTERVAL` | `30` | Self-healing check interval in seconds |
+| `WARP_MONITOR_RETRIES` | `5` | Consecutive check failures before triggering container restart |
 
 ### Persistent Storage
 
@@ -199,6 +204,31 @@ or for WARP+ users:
 ```
 warp=plus
 ```
+
+---
+
+## Self-Healing (Auto-Restart on WARP Failure)
+
+Docker's built-in health check only marks the container as `unhealthy` — it does **not** restart it. If the WARP tunnel goes down while gost (the proxy process) keeps running, the container stays up but traffic is routed through your direct connection instead of WARP.
+
+Self-healing mode is **enabled by default** (`WARP_AUTO_RESTART=1`). To disable it, set the variable to empty:
+
+```yaml
+environment:
+  - WARP_AUTO_RESTART=         # disable self-healing
+  # WARP_MONITOR_INTERVAL=30   # check every 30 seconds (default)
+  # WARP_MONITOR_RETRIES=5     # restart after 5 consecutive failures (default)
+```
+
+**How it works:**
+
+1. A background monitor runs inside the container, checking WARP connectivity every `WARP_MONITOR_INTERVAL` seconds.
+2. If WARP is unreachable for `WARP_MONITOR_RETRIES` consecutive checks, the monitor terminates gost (the container's main process).
+3. Docker's `restart: always` policy then recreates the container, starting a fresh WARP session.
+
+> ⚠️ This feature requires `restart: always` (or equivalent restart policy) to be set. Without it, the container will simply stop after termination.
+
+With the default settings, the maximum time to detect and recover from a failure is approximately **2.5 minutes** (30s × 5 retries).
 
 ---
 

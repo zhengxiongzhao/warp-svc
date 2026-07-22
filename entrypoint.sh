@@ -3,9 +3,7 @@
 # exit when any command fails
 set -e
 
-export WARP_SLEEP=${WARP_SLEEP:-5}
-export GOST_LOGGER_LEVEL=${LOG_LEVEL:-error}
-export GOST_ARGS="-L :${PROXY_PORT:-1080}"
+export WARP_SLEEP=${WARP_SLEEP:-2}
 export WARP_LICENSE_KEY=${WARP_LICENSE}
 
 # create a tun device if not exist
@@ -24,7 +22,13 @@ fi
 sudo dbus-daemon --config-file=/usr/share/dbus-1/system.conf
 
 # start the daemon
-sudo warp-svc --accept-tos > /dev/null &
+# In debug/trace mode, forward warp-svc logs to stdout for troubleshooting.
+# In all other modes, discard warp-svc output to keep container logs clean.
+if [ "${LOG_LEVEL}" = "debug" ] || [ "${LOG_LEVEL}" = "trace" ]; then
+    sudo warp-svc --accept-tos &
+else
+    sudo warp-svc --accept-tos > /dev/null &
+fi
 
 # sleep to wait for the daemon to start, default 5 seconds
 sleep "$WARP_SLEEP"
@@ -81,26 +85,58 @@ if [ -n "$WARP_ENABLE_NAT" ]; then
 fi
 
 # start the proxy
-case "$GOST_LOGGER_LEVEL" in
-    fatal)
-        gost $GOST_ARGS > /dev/null 2>&1
-        ;;
-    error)
-        gost $GOST_ARGS 2> /dev/null
-        ;;
-    warn)
-        gost $GOST_ARGS > >(grep -E '^(WARN|ERROR|FATAL)' || true) 2> /dev/null
-        ;;
-    info)
-        gost $GOST_ARGS > >(grep -E '^(INFO|WARN|ERROR|FATAL)' || true) 2> /dev/null
-        ;;
-    debug)
-        gost $GOST_ARGS > >(grep -E '^(DEBUG|INFO|WARN|ERROR|FATAL)' || true) 2> /dev/null
-        ;;
-    trace)
-        gost $GOST_ARGS
-        ;;
-    *)
-        gost $GOST_ARGS
-        ;;
-esac
+# gost v3 natively reads log level from GOST_LOGGER_LEVEL environment variable
+# optional values (low to high): fatal error warn info debug trace
+export GOST_LOGGER_LEVEL="${LOG_LEVEL:-error}"
+
+# format listen host: IPv6 addresses need square brackets (e.g. [::]), IPv4 stays as-is
+format_listen_host() {
+    case "$1" in
+        *:*) echo "[$1]" ;;
+        *)   echo "$1"  ;;
+    esac
+}
+
+# URL-encode user/pass to avoid breaking gost URL parsing with special characters
+url_encode() {
+    printf '%s' "$1" | sed \
+        -e 's/%/%25/g' \
+        -e 's/@/%40/g' \
+        -e 's/:/%3A/g' \
+        -e 's/#/%23/g' \
+        -e 's/\?/%3F/g' \
+        -e 's/&/%26/g' \
+        -e 's/ /%20/g'
+}
+
+LISTEN_HOST=$(format_listen_host "${BIND_ADDR:-::}")
+LISTEN_PORT="${BIND_PORT:-1080}"
+
+if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
+    URL_USER=$(url_encode "$SOCKS_USER")
+    URL_PASS=$(url_encode "$SOCKS_PASS")
+    GOST_LISTEN="socks5://${URL_USER}:${URL_PASS}@${LISTEN_HOST}:${LISTEN_PORT}"
+    echo "SOCKS5 authentication enabled (User: $SOCKS_USER)"
+else
+    GOST_LISTEN="socks5://${LISTEN_HOST}:${LISTEN_PORT}"
+    echo "SOCKS5 running in no-auth mode"
+fi
+
+echo "gost listening on ${BIND_ADDR:-::}:${LISTEN_PORT} (log level: ${GOST_LOGGER_LEVEL})"
+
+# Start the self-healing monitor as a background process.
+# When enabled, it periodically checks WARP connectivity and terminates the
+# container (gost = PID 1) after repeated failures so that restart:always
+# can bring everything back online.
+if [ -n "$WARP_AUTO_RESTART" ]; then
+    DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    # In the image, scripts are at /healthcheck/. Fall back to ./scripts for local dev.
+    if [ ! -f "$DIR/scripts/warp-monitor.sh" ] && [ -f "/healthcheck/warp-monitor.sh" ]; then
+        bash /healthcheck/warp-monitor.sh &
+    else
+        bash "$DIR/scripts/warp-monitor.sh" &
+    fi
+    echo "[warp-monitor] Self-healing monitor enabled."
+fi
+
+exec gost -L "$GOST_LISTEN"
