@@ -168,6 +168,10 @@ docker run -d \
 | `SOCKS_USER` | _(empty)_ | SOCKS5 authentication username, empty = no auth |
 | `SOCKS_PASS` | _(empty)_ | SOCKS5 authentication password, requires `SOCKS_USER` |
 | `LOG_LEVEL` | `error` | gost log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` |
+| `WARP_ENABLE_NAT` | _(empty)_ | Enable NAT mode (experimental): route container traffic through WARP interface |
+| `BETA_FIX_HOST_CONNECTIVITY` | _(empty)_ | Enable host-to-container connectivity fix via nft rules (BETA) |
+| `REGISTER_WHEN_MDM_EXISTS` | _(empty)_ | Force re-registration even when `mdm.xml` already exists |
+| `DEBUG_ENABLE_QLOG` | _(empty)_ | Enable WARP QUIC logging (qlog) for debugging |
 | `WARP_AUTO_RESTART` | `1` | Set to empty to disable self-healing: auto-restart container when WARP tunnel is down |
 | `WARP_MONITOR_INTERVAL` | `30` | Self-healing check interval in seconds |
 | `WARP_MONITOR_RETRIES` | `5` | Consecutive check failures before triggering container restart |

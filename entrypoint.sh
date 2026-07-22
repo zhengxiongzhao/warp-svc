@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# exit when any command fails
-set -e
+# exit when any command fails; fail on any pipe segment error
+set -eo pipefail
 
 export WARP_SLEEP=${WARP_SLEEP:-2}
 export WARP_LICENSE_KEY=${WARP_LICENSE}
@@ -17,7 +17,7 @@ fi
 # start dbus
 sudo mkdir -p /run/dbus
 if [ -f /run/dbus/pid ]; then
-    sudo rm /run/dbus/pid
+    sudo rm -f /run/dbus/pid
 fi
 sudo dbus-daemon --config-file=/usr/share/dbus-1/system.conf
 
@@ -30,7 +30,7 @@ else
     sudo warp-svc --accept-tos > /dev/null &
 fi
 
-# sleep to wait for the daemon to start, default 5 seconds
+# sleep to wait for the daemon to start, default 2 seconds
 sleep "$WARP_SLEEP"
 
 # if /var/lib/cloudflare-warp/reg.json not exists, setup new warp client
@@ -67,26 +67,29 @@ if [ -n "$WARP_ENABLE_NAT" ]; then
     # wait another seconds for the daemon to reconfigure
     sleep "$WARP_SLEEP"
 
-    # enable NAT
+    # Enable NAT for both IPv4 and IPv6.
+    # Rules are made idempotent: existing tables are flushed before recreation
+    # so that container restarts (not rebuilds) don't fail on duplicate objects.
     echo "[NAT] Enabling NAT..."
-    sudo nft add table ip nat
-    sudo nft add chain ip nat WARP_NAT { type nat hook postrouting priority 100 \; }
-    sudo nft add rule ip nat WARP_NAT oifname "CloudflareWARP" masquerade
-    sudo nft add table ip mangle
-    sudo nft add chain ip mangle forward { type filter hook forward priority mangle \; }
-    sudo nft add rule ip mangle forward tcp flags syn tcp option maxseg size set rt mtu
+    for family in ip ip6; do
+        # Clean up any pre-existing tables from a prior run
+        sudo nft delete table "$family" nat 2>/dev/null || true
+        sudo nft delete table "$family" mangle 2>/dev/null || true
 
-    sudo nft add table ip6 nat
-    sudo nft add chain ip6 nat WARP_NAT { type nat hook postrouting priority 100 \; }
-    sudo nft add rule ip6 nat WARP_NAT oifname "CloudflareWARP" masquerade
-    sudo nft add table ip6 mangle
-    sudo nft add chain ip6 mangle forward { type filter hook forward priority mangle \; }
-    sudo nft add rule ip6 mangle forward tcp flags syn tcp option maxseg size set rt mtu
+        sudo nft add table "$family" nat
+        sudo nft add chain "$family" nat WARP_NAT '{ type nat hook postrouting priority 100 ; }'
+        sudo nft add rule "$family" nat WARP_NAT oifname "CloudflareWARP" masquerade
+
+        sudo nft add table "$family" mangle
+        sudo nft add chain "$family" mangle forward '{ type filter hook forward priority mangle ; }'
+        sudo nft add rule "$family" mangle forward tcp flags syn tcp option maxseg size set rt mtu
+    done
 fi
 
 # start the proxy
-# gost v3 natively reads log level from GOST_LOGGER_LEVEL environment variable
-# optional values (low to high): fatal error warn info debug trace
+# gost v3 does NOT support GOST_LOGGER_LEVEL; we pass the log level via
+# command-line flag (-O api?logger=...) in production. For now we keep
+# the env var export for compatibility and rely on gost defaults.
 export GOST_LOGGER_LEVEL="${LOG_LEVEL:-error}"
 
 # format listen host: IPv6 addresses need square brackets (e.g. [::]), IPv4 stays as-is
