@@ -31,10 +31,16 @@ jobs:
         id: set-version
         run: |
           VERSION="${GITHUB_REF_NAME}"
+          TAGS="zhengxiongzhao/warp-svc:${VERSION}"
+          if [[ ! "${VERSION}" == *"-test"* ]]; then
+            TAGS="${TAGS},zhengxiongzhao/warp-svc:latest"
+          fi
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tags=${TAGS}" >> "${GITHUB_OUTPUT}"
           echo "status=success" >> "${GITHUB_OUTPUT}"
           echo "Docker image version: ${VERSION}"
+          echo "Generated tags: ${TAGS}"
 
       # Build and push
 
@@ -45,7 +51,5 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            zhengxiongzhao/warp-svc:${{ steps.set-version.outputs.version }}
-            zhengxiongzhao/warp-svc:latest  
+          tags: ${{ steps.set-version.outputs.tags }}
 

@@ -52,3 +52,35 @@ for network in $networks; do
     sudo ip rule add to "$network" lookup main priority 10
   fi
 done
+
+# add policy routing for traffic originating from the container's own physical IPs
+# (forces reply packets for incoming public traffic to exit via their incoming interface)
+local_ips=$(ip --json address | jq -r '
+  .[] |
+  select((.ifname != "lo") and (.ifname != "CloudflareWARP")) |
+  .addr_info[] |
+  select(.family == "inet") |
+  .local
+')
+
+for ip in $local_ips; do
+  if ! ip rule list | grep -q "from $ip lookup main"; then
+    echo "[fix-host-connectivity] Adding routing rule for traffic originating from $ip."
+    sudo ip rule add from "$ip" lookup main priority 9
+  fi
+done
+
+local_ip6s=$(ip --json address | jq -r '
+  .[] |
+  select((.ifname != "lo") and (.ifname != "CloudflareWARP")) |
+  .addr_info[] |
+  select(.family == "inet6" and (.local | startswith("fe80:") | not)) |
+  .local
+')
+
+for ip6 in $local_ip6s; do
+  if ! ip -6 rule list | grep -q "from $ip6 lookup main"; then
+    echo "[fix-host-connectivity] Adding IPv6 routing rule for traffic originating from $ip6."
+    sudo ip -6 rule add from "$ip6" lookup main priority 9
+  fi
+done
