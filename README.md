@@ -101,11 +101,11 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
     environment:
-      TZ: Asia/Shanghai
-      BIND_PORT: 1080
-      LOG_LEVEL: error
-      # SOCKS_USER: admin       # optional: enable SOCKS5 auth
-      # SOCKS_PASS: 123456      # requires SOCKS_USER
+      - TZ=Asia/Shanghai
+      - BIND_PORT=1080
+      - LOG_LEVEL=error
+      # SOCKS_USER=admin       # optional: enable SOCKS5 auth
+      # SOCKS_PASS=123456      # requires SOCKS_USER
     # Optional: Persist WARP account data
     # volumes:
     #   - ./data:/var/lib/cloudflare-warp
