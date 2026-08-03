@@ -44,11 +44,16 @@ if [ ! -f /var/lib/cloudflare-warp/reg.json ]; then
             warp-cli registration license "$WARP_LICENSE_KEY" && echo "Warp license registered!"
         fi
     fi
-    # connect to the warp server
-    warp-cli --accept-tos connect
 else
     echo "Warp client already registered, skip registration"
 fi
+
+# Connect to the WARP server on every container start/restart.
+# When reg.json already exists (container restart with persisted volume),
+# warp-svc is a freshly started daemon that has NOT yet established a tunnel.
+# An explicit connect is required to avoid the warp-monitor death-loop.
+echo "Connecting to Cloudflare WARP..."
+warp-cli --accept-tos connect
 
 # disable qlog if DEBUG_ENABLE_QLOG is empty
 if [ -z "$DEBUG_ENABLE_QLOG" ]; then
