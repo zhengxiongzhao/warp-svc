@@ -7,39 +7,79 @@
 Run Cloudflare WARP as a SOCKS5 proxy server in Docker. Supports `amd64` and `arm64`.
 
 ---
-## Features
 
-✨ **Automatic Registration** - Register new Cloudflare WARP accounts automatically
+## Two Variants
 
-⚡ **WARP+ Support** - Subscribe to Cloudflare WARP+ for unlimited data
+This image is available in **two variants**:
 
-🔄 **Health Monitoring** - Built-in health checks with automatic recovery
+| | **Micro** | **Standard** |
+|---|---|---|
+| Image tag | `zhengxiongzhao/warp-svc:latest-micro` | `zhengxiongzhao/warp-svc:latest` |
+| Base image | `alpine:latest` | `debian:stable-slim` |
+| WARP implementation | Linux kernel WireGuard + `wgcf` | Official `warp-svc` client |
+| SOCKS5 engine | `microsocks` (lightweight C) | `gost` (v3) |
+| Image size | **Much smaller** | Larger |
+| Config volume | `/etc/wireguard` (`wg0.conf`) | `/var/lib/cloudflare-warp` |
+| WARP+ license | via `wgcf` profile | ✅ `WARP_LICENSE` |
+| IPv6 dual-stack | ✅ (default on) | ✅ |
+| Endpoint auto-selection | ✅ | — |
+| Self-healing monitor | — | ✅ |
 
-🔧 **Self-Healing** - Optional auto-restart when WARP tunnel goes down
+- **Micro** (`latest-micro`) — a minimal variant using a kernel-level WireGuard tunnel + lightweight `microsocks`, with a much smaller image size. Includes WARP Endpoint auto-selection.
+- **Standard** (`latest`) — the full-featured variant built on the official Cloudflare WARP client, with WARP+ license support and built-in self-healing.
 
-🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms
+---
 
 ## Quick Start
 
-### docker run
+### Micro (`latest-micro`)
 
-```bash
-docker run -d \
-  --name cloudflare-warp \
-  --restart always \
-  --device /dev/net/tun \
-  --cap-add NET_ADMIN \
-  --cap-add MKNOD \
-  --cap-add AUDIT_WRITE \
-  --sysctl net.ipv4.ip_forward=1 \
-  --sysctl net.ipv4.conf.all.src_valid_mark=1 \
-  -e TZ=Asia/Shanghai \
-  -e BIND_PORT=1080 \
-  -p 1080:1080 \
-  zhengxiongzhao/warp-svc:latest
+```yaml
+services:
+  cloudflare-warp:
+    image: zhengxiongzhao/warp-svc:latest-micro
+    container_name: cloudflare-warp
+    restart: always
+    ports:
+      - "1080:1080"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
+    environment:
+      - TZ=Asia/Shanghai
+      - BIND_ADDR=::
+      - BIND_PORT=1080
+      - ENABLE_IPV6=1
+      # - SOCKS_USER=admin                # optional: enable SOCKS5 auth
+      # - SOCKS_PASS=123456               # requires SOCKS_USER
+      # - ENDPOINT_IP=162.159.192.1:4500  # optional: manual WARP Endpoint (port hopping)
+    volumes:
+      - warp-data:/etc/wireguard          # persist wg0.conf (WARP account data)
 ```
 
-### docker compose
+```bash
+docker compose up -d
+```
+
+> **Micro registration note:** the container auto-registers a new WARP device and generates `wg0.conf` on first start. If the auto-registration fails (commonly caused by datacenter IP rate limiting), generate the config on your local machine and mount it:
+
+```bash
+# On your local machine: download and run the registration helper
+curl -Lso- zxzhao.com/t/warp_register.sh | bash
+
+# Upload the generated wg0.conf to your VPS and mount it
+# scp wg0.conf user@your-vps:/path/to/project/warp-data/wg0.conf
+```
+
+---
+
+### Standard (`latest`)
 
 ```yaml
 services:
@@ -96,6 +136,12 @@ For WARP+ users:
 warp=plus
 ```
 
+For the Micro variant, you can also verify IPv6 egress:
+
+```bash
+curl -6 -x socks5h://[::1]:1080 -sL https://cloudflare.com/cdn-cgi/trace | grep -E 'warp|ip='
+```
+
 ---
 
 ## Host System Setup
@@ -121,6 +167,29 @@ firewall-cmd --zone=public --add-masquerade --permanent
 
 ## Environment Variables
 
+### Micro (`latest-micro`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TZ` | `Asia/Shanghai` | Container timezone |
+| `BIND_ADDR` | `::` | SOCKS5 bind address, `::` for IPv4/IPv6 dual-stack |
+| `BIND_PORT` | `1080` | SOCKS5 listen port |
+| `SOCKS_USER` | _(empty)_ | SOCKS5 authentication username, empty = no auth |
+| `SOCKS_PASS` | _(empty)_ | SOCKS5 authentication password, requires `SOCKS_USER` |
+| `ENABLE_IPV6` | `1` | Enable IPv6 routing and IPv6 egress, `0` to disable |
+| `DEBUG` | `false` | `true` prints detailed MicroSOCKS logs (default quiet `-q`) |
+| `ENDPOINT_IP` | _(empty)_ | Manually pin a WARP Endpoint (e.g. `162.159.192.1:4500`), skips auto-selection |
+| `ENDPOINT_AUTO` | `1` | `0` disables Endpoint auto-selection and uses the wgcf default |
+| `ENDPOINT_IPS` | built-in list | Space-separated candidate WARP Endpoint IPs for auto-selection |
+| `ENDPOINT_PORTS` | built-in list | Space-separated candidate WARP Endpoint ports (2408 500 4500 …) |
+| `ENDPOINT_TEST_TIMEOUT` | `8` | Seconds to wait for a handshake per Endpoint |
+| `ENDPOINT_READY_RETRIES` | `5` | Data-plane readiness retries after a successful handshake |
+| `ENDPOINT_READY_INTERVAL` | `3` | Seconds between readiness checks |
+| `TAILSCALE_CIDR` | `100.64.0.0/10` | CIDR whose return route is restored (e.g. Tailscale) |
+| `GH_PROXY` | _(empty)_ | GitHub proxy prefix for downloading `wgcf` |
+
+### Standard (`latest`)
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `Asia/Shanghai` | Container timezone |
@@ -142,6 +211,24 @@ firewall-cmd --zone=public --add-masquerade --permanent
 
 ## WARP+ (Unlimited Data)
 
+### Micro (`latest-micro`)
+
+Generate a WARP+ profile locally with `wgcf` and mount it as `wg0.conf`:
+
+```bash
+# Register a device and obtain a WARP+ license first (see your wgcf docs),
+# then generate the profile and upload it:
+curl -Lso- zxzhao.com/t/warp_register.sh | bash
+scp wg0.conf user@your-vps:/path/to/project/warp-data/wg0.conf
+```
+
+```yaml
+volumes:
+  - ./warp-data:/etc/wireguard   # contains wg0.conf
+```
+
+### Standard (`latest`)
+
 Set your WARP+ license key to unlock unlimited data:
 
 ```yaml
@@ -155,7 +242,7 @@ environment:
 
 ## SOCKS5 Authentication
 
-Enable username/password protection:
+Both variants support username/password protection:
 
 ```yaml
 environment:
@@ -172,6 +259,8 @@ curl -x socks5h://admin:your-password@127.0.0.1:1080 -sL https://cloudflare.com/
 ---
 
 ## Self-Healing (Auto-Restart)
+
+> Standard (`latest`) only — the Micro variant does not include the self-healing monitor.
 
 Docker's health check only marks the container as `unhealthy` — it does **not** restart it. If the WARP tunnel goes down while the proxy process keeps running, traffic would be routed through your direct connection.
 
@@ -190,18 +279,23 @@ environment:
 
 | Tag | Description |
 |-----|-------------|
-| `latest` | Latest stable release |
+| `latest` | Latest stable release (Standard variant) |
+| `latest-micro` | Latest Micro variant release |
+| `slim-latest` | Standard variant on `debian:bookworm-slim` base |
+| `slim-<warp>-<gost>` | Pinned slim variant (warp + gost version) |
+| `<warp>-<gost>` | Pinned Standard variant (warp + gost version) |
 | `v3.0.0` | Pinned version tag |
-| `3.0.0` | Semver without `v` prefix |
 
 ---
 
 ## Supported Architectures
 
+Both variants support the following architectures:
+
 | Architecture | Tag |
 |--------------|-----|
-| `linux/amd64` | `latest`, version tags |
-| `linux/arm64` | `latest`, version tags |
+| `linux/amd64` | `latest`, `latest-micro`, version tags |
+| `linux/arm64` | `latest`, `latest-micro`, version tags |
 
 ---
 
@@ -209,6 +303,7 @@ environment:
 
 - **GitHub**: [zhengxiongzhao/warp-svc](https://github.com/zhengxiongzhao/warp-svc)
 - **Docker Hub**: [zhengxiongzhao/warp-svc](https://hub.docker.com/r/zhengxiongzhao/warp-svc)
+- **MicroSOCKS**: [zhengxiongzhao/microsocks](https://github.com/zhengxiongzhao/microsocks)
 - **Issues**: [Report a bug](https://github.com/zhengxiongzhao/warp-svc/issues)
 - **Cloudflare WARP Docs**: [developers.cloudflare.com/warp-client](https://developers.cloudflare.com/warp-client/)
 

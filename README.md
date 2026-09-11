@@ -17,6 +17,8 @@ This Docker image packages the official Cloudflare WARP client for Linux and pro
 
 **Why this project?** The official Cloudflare WARP client for Linux only listens on localhost, making it unusable in Docker containers that need to bind to 0.0.0.0. This image solves that problem by using `gost` (v3) to forward traffic.
 
+> **✨ Also available: Micro variant** — a minimal image (`zhengxiongzhao/warp-svc:latest-micro`) built on Alpine with a kernel-level WireGuard tunnel and the lightweight `microsocks` SOCKS5 engine. See the [Docker Hub README](https://hub.docker.com/r/zhengxiongzhao/warp-svc) for details.
+
 ---
 
 ## Features
