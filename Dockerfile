@@ -1,9 +1,13 @@
+# 全局构建参数定义（可由 CI .github/workflows/build-push.yml 或 --build-arg 覆盖）
 ARG BASE_IMAGE=debian:stable-slim
+ARG WARP_VERSION=2025.10.186.0
+ARG GOST_VERSION=3.0.0
+ARG COMMIT_SHA
 
 # ================= Warp 下载阶段 =================
 # 隔离 Cloudflare GPG key 和 apt 源配置到独立阶段，最终镜像无需安装 gnupg
 FROM ${BASE_IMAGE} AS warp-downloader
-ARG WARP_VERSION=2025.10.186.0
+ARG WARP_VERSION
 
 RUN set -eux && \
     apt-get update && \
@@ -29,7 +33,7 @@ RUN set -eux && \
 # ================= Gost 下载阶段 =================
 # --platform=$BUILDPLATFORM: 下载始终在宿主机原生 CPU 上执行，避免 QEMU 模拟拖慢
 FROM --platform=$BUILDPLATFORM ${BASE_IMAGE} AS gost-downloader
-ARG GOST_VERSION=3.0.0
+ARG GOST_VERSION
 ARG GH_PROXY
 ARG TARGETPLATFORM
 
@@ -42,7 +46,8 @@ RUN set -eux && \
         *) echo "Unsupported TARGETPLATFORM: ${TARGETPLATFORM}"; exit 1 ;; \
     esac && \
     # Prefer the pinned GOST_VERSION for reproducible builds; fall back to latest
-    GOST_VER="${GOST_VERSION}" && \
+    # Strip leading 'v' if present (e.g. v3.0.0 -> 3.0.0)
+    GOST_VER="${GOST_VERSION#v}" && \
     if [ -z "$GOST_VER" ]; then \
         GOST_VER=$(curl -sL "https://api.github.com/repos/go-gost/gost/releases/latest" \
             | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/'); \
@@ -57,13 +62,14 @@ RUN set -eux && \
 # ================= 最终阶段 =================
 FROM ${BASE_IMAGE}
 
-ARG WARP_VERSION=2025.10.186.0
-ARG GOST_VERSION=3.0.0
+ARG WARP_VERSION
+ARG GOST_VERSION
 ARG COMMIT_SHA
 
-LABEL WARP_VERSION=${WARP_VERSION}
-LABEL GOST_VERSION=${GOST_VERSION}
-LABEL COMMIT_SHA=${COMMIT_SHA}
+LABEL WARP_VERSION=${WARP_VERSION} \
+      GOST_VERSION=${GOST_VERSION} \
+      COMMIT_SHA=${COMMIT_SHA} \
+      org.opencontainers.image.revision=${COMMIT_SHA}
 
 # All runtime-configurable environment variables in a single layer
 ENV TZ=Asia/Shanghai \
