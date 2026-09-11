@@ -401,54 +401,19 @@ fi
 LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
-# 解析 gost 日志级别（通过 gost 原生环境变量 GOST_LOGGER_LEVEL 控制）
-# 优先级：显式 LOG_LEVEL > DEBUG=true(debug) > 默认 error
-# 可选值（由低到高）：fatal error warn info debug trace
-# 注意：gost v3 默认即为前台守护运行，无需额外命令行标志即可保持前台不退出。
-GOST_LOG_LEVEL="${LOG_LEVEL:-}"
-if [ -z "$GOST_LOG_LEVEL" ]; then
-    if [ "${DEBUG:-false}" = "true" ]; then
-        GOST_LOG_LEVEL="debug"
-    else
-        GOST_LOG_LEVEL="error"
-    fi
+# 根据 DEBUG 环境变量决定是否启用静默模式（默认静默）
+if [ "${DEBUG:-false}" = "true" ]; then
+    QUIET_FLAG=""
+else
+    QUIET_FLAG="-q"
 fi
-export GOST_LOGGER_LEVEL="$GOST_LOG_LEVEL"
-
-# 将监听地址格式化为 gost URL 中的 host 部分
-# - IPv6 地址（含冒号）必须用方括号包裹：[::] / [2001:db8::1]
-# - IPv4 地址 / 0.0.0.0 保持原样
-format_listen_host() {
-    case "$1" in
-        *:*) echo "[$1]" ;;
-        *)   echo "$1"  ;;
-    esac
-}
-
-# 对用户名/密码做 URL 编码，避免特殊字符破坏 gost URL 解析
-# 仅处理可能出现的少量特殊字符，普通用户名密码原样通过
-url_encode() {
-    printf '%s' "$1" | sed \
-        -e 's/%/%25/g' \
-        -e 's/@/%40/g' \
-        -e 's/:/%3A/g' \
-        -e 's/#/%23/g' \
-        -e 's/\?/%3F/g' \
-        -e 's/&/%26/g' \
-        -e 's/ /%20/g'
-}
-
-LISTEN_HOST=$(format_listen_host "$LISTEN_ADDR")
 
 if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
-    URL_USER=$(url_encode "$SOCKS_USER")
-    URL_PASS=$(url_encode "$SOCKS_PASS")
-    GOST_LISTEN="socks5://${URL_USER}:${URL_PASS}@${LISTEN_HOST}:${LISTEN_PORT}"
     echo "==> [MicroWARP] 身份认证已开启 (User: $SOCKS_USER)"
+    echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
+    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT" -u "$SOCKS_USER" -P "$SOCKS_PASS"
 else
-    GOST_LISTEN="socks5://${LISTEN_HOST}:${LISTEN_PORT}"
     echo "==> [MicroWARP] 未设置密码，当前为公开访问模式"
+    echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
+    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT"
 fi
-
-echo "==> [MicroWARP] gost 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT} (日志级别: ${GOST_LOG_LEVEL})"
-exec gost -L "$GOST_LISTEN"

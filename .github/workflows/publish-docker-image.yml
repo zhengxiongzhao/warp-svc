@@ -47,5 +47,5 @@ jobs:
           push: true
           tags: |
             zhengxiongzhao/warp-svc:${{ steps.set-version.outputs.version }}
-            zhengxiongzhao/warp-svc:latest  
+            zhengxiongzhao/warp-svc:latest-micro
 
