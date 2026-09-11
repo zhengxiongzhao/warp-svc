@@ -8,6 +8,19 @@
 set -euo pipefail
 
 # ==========================================
+# 代理配置
+# ==========================================
+# WARP_PROXY: 可选，wgcf 注册/配置生成走 HTTP/SOCKS5 代理
+#   示例: export WARP_PROXY=http://127.0.0.1:7890
+#         export WARP_PROXY=socks5://127.0.0.1:1080
+# 设置后会自动注入到 curl/wget/wgcf 的网络请求中，用于绕过
+# Cloudflare 对数据中心 IP 段的注册限流（推荐使用住宅 IP 代理）。
+WARP_PROXY="${WARP_PROXY:-}"
+export HTTPS_PROXY="${WARP_PROXY:-${HTTPS_PROXY:-}}"
+export HTTP_PROXY="${WARP_PROXY:-${HTTP_PROXY:-}}"
+export ALL_PROXY="${WARP_PROXY:-${ALL_PROXY:-}}"
+
+# ==========================================
 # 颜色输出
 # ==========================================
 RED='\033[0;31m'
@@ -58,7 +71,8 @@ detect_arch() {
 get_latest_version() {
     local version
     local default_version="2.2.31"
-    version=$(curl -sL --connect-timeout 10 "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+    # --noproxy '*' 保持版本查询直连（属于下载流程，不走 WARP_PROXY）
+    version=$(curl -sL --noproxy '*' --connect-timeout 10 "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
     if [ -z "$version" ]; then
         warn "无法获取 wgcf 最新版本号，使用默认版本: v${default_version}"
         echo "$default_version"
@@ -85,22 +99,26 @@ build_download_url() {
 }
 
 # ==========================================
-# 下载 wgcf（带重试和代理回退）
+# 下载 wgcf（带重试和加速回退）
 # ==========================================
+# 注意：wgcf 二进制下载始终直连，不走 WARP_PROXY。
+# 代理（WARP_PROXY）仅用于 wgcf 注册与配置生成阶段。
+# 已有 GH_PROXY 前缀或 gh-proxy.com 加速回退处理 GitHub 下载。
 download_wgcf() {
     local url="$1"
     local gh_proxy_fallback="https://gh-proxy.com/${url}"
-    
+
+    # --noproxy '*' 显式屏蔽环境变量代理（HTTPS_PROXY/HTTP_PROXY/ALL_PROXY），确保下载直连
     info "尝试直接下载..."
-    if curl -LsSo wgcf --connect-timeout 15 --max-time 60 "$url"; then
+    if curl -LsSo wgcf --noproxy '*' --connect-timeout 15 --max-time 60 "$url"; then
         return 0
     fi
-    
-    warn "直接下载失败，尝试使用 gh-proxy.com 代理..."
-    if curl -LsSo wgcf --connect-timeout 15 --max-time 120 "$gh_proxy_fallback"; then
+
+    warn "直接下载失败，尝试使用 gh-proxy.com 加速..."
+    if curl -LsSo wgcf --noproxy '*' --connect-timeout 15 --max-time 120 "$gh_proxy_fallback"; then
         return 0
     fi
-    
+
     return 1
 }
 
@@ -118,6 +136,13 @@ main() {
     os=$(detect_os)
     arch=$(detect_arch)
     info "检测到系统: ${os}/${arch}"
+    
+    # 显示代理状态（仅用于 wgcf 注册/配置生成，二进制下载始终直连）
+    if [ -n "$WARP_PROXY" ]; then
+        info "注册将使用代理: ${WARP_PROXY}（wgcf 下载仍直连）"
+    else
+        info "未设置 WARP_PROXY，使用直连（若遇注册限流可设置代理）"
+    fi
     
     # 获取最新版本
     info "正在获取 wgcf 最新版本..."

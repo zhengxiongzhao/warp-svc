@@ -2,6 +2,20 @@
 set -e
 
 # ==========================================
+# 代理配置
+# ==========================================
+# WARP_PROXY: 可选，wgcf 注册走 HTTP/SOCKS5 代理
+#   示例: -e WARP_PROXY=http://127.0.0.1:7890
+#         -e WARP_PROXY=socks5://127.0.0.1:1080
+# 设置后自动注入到 wgcf 注册/配置生成的网络请求，用于绕过
+# Cloudflare 对数据中心 IP 段的注册限流（推荐住宅 IP 代理）。
+# 注意：wgcf 二进制下载与版本查询始终直连，不走该代理。
+WARP_PROXY="${WARP_PROXY:-}"
+export HTTPS_PROXY="${WARP_PROXY:-${HTTPS_PROXY:-}}"
+export HTTP_PROXY="${WARP_PROXY:-${HTTP_PROXY:-}}"
+export ALL_PROXY="${WARP_PROXY:-${ALL_PROXY:-}}"
+
+# ==========================================
 # 工具函数
 # ==========================================
 github_auth_header() {
@@ -47,12 +61,19 @@ if [ ! -f "$WG_CONF" ]; then
 
     GITHUB_AUTH_HEADER=$(github_auth_header)
     if [ -n "$GITHUB_AUTH_HEADER" ]; then
-        WGCF_VER=$(curl -sL -H "$GITHUB_AUTH_HEADER" "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+        # --noproxy '*' 保持版本查询直连（属于下载流程，不走 WARP_PROXY）
+        WGCF_VER=$(curl -sL --noproxy '*' -H "$GITHUB_AUTH_HEADER" "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
     else
-        WGCF_VER=$(curl -sL "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+        # --noproxy '*' 保持版本查询直连（属于下载流程，不走 WARP_PROXY）
+        WGCF_VER=$(curl -sL --noproxy '*' "https://api.github.com/repos/ViRb3/wgcf/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
     fi
     echo "==> [MicroWARP] 检测到最新 wgcf 版本: v${WGCF_VER}"
-    wget --timeout=15 -qO wgcf "$(build_wgcf_download_url "$WGCF_VER" "$WGCF_ARCH")"
+    if [ -n "$WARP_PROXY" ]; then
+        echo "==> [MicroWARP] 已在注册阶段启用代理: ${WARP_PROXY}（wgcf 下载仍直连）"
+    fi
+    # wgcf 二进制下载始终直连：-Y off 屏蔽环境变量代理，避免代理影响下载
+    # （-Y 在 GNU wget 与 busybox wget 中均受支持）
+    wget --timeout=15 -qO wgcf -Y off "$(build_wgcf_download_url "$WGCF_VER" "$WGCF_ARCH")"
     chmod +x wgcf
 
     # 注册重试逻辑：最多 3 次，指数退避 30s -> 60s
@@ -78,8 +99,8 @@ if [ ! -f "$WG_CONF" ]; then
     done
 
     if [ "$register_success" = "false" ]; then
-        # 获取当前 VPS 出口 IP
-        CURRENT_IP=$(curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep '^ip=' | cut -d= -f2 || true)
+        # 获取当前 VPS 出口 IP（须直连取得真实 IP 用于诊断，走代理会返回代理 IP）
+        CURRENT_IP=$(curl -4 -s -m 5 --noproxy '*' https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep '^ip=' | cut -d= -f2 || true)
 
         echo ""
         echo "==> [ERROR] =========================================="
@@ -396,24 +417,27 @@ if [ "$ENABLE_IPV6" = "1" ]; then
 fi
 
 # ==========================================
-# 5. 启动 SOCKS5 代理服务
+# 5. 启动代理服务 (vproxy)
 # ==========================================
 LISTEN_ADDR=${BIND_ADDR:-"::"}
 LISTEN_PORT=${BIND_PORT:-"1080"}
 
-# 根据 DEBUG 环境变量决定是否启用静默模式（默认静默）
-if [ "${DEBUG:-false}" = "true" ]; then
-    QUIET_FLAG=""
-else
-    QUIET_FLAG="-q"
-fi
+# 规范化监听地址：vproxy 使用 [::] 表示 IPv6 双栈，microsocks 使用 ::
+case "$LISTEN_ADDR" in
+    ::) BIND_SOCKET="[::]:${LISTEN_PORT}" ;;
+    *)  BIND_SOCKET="${LISTEN_ADDR}:${LISTEN_PORT}" ;;
+esac
+
+# vproxy 日志级别通过 VPROXY_LOG 环境变量控制（默认 error，减少 docker logs 噪音）
+# 可用值: trace / debug / info / warn / error
+export VPROXY_LOG="${VPROXY_LOG:-${LOG_LEVEL:-error}}"
 
 if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
     echo "==> [MicroWARP] 身份认证已开启 (User: $SOCKS_USER)"
-    echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
-    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT" -u "$SOCKS_USER" -P "$SOCKS_PASS"
+    echo "==> [MicroWARP] vproxy 引擎已启动，正在监听 ${BIND_SOCKET} (log: ${VPROXY_LOG})"
+    exec vproxy run --bind "$BIND_SOCKET" auto -u "$SOCKS_USER" -p "$SOCKS_PASS"
 else
     echo "==> [MicroWARP] 未设置密码，当前为公开访问模式"
-    echo "==> [MicroWARP] MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
-    exec microsocks $QUIET_FLAG -i "$LISTEN_ADDR" -p "$LISTEN_PORT"
+    echo "==> [MicroWARP] vproxy 引擎已启动，正在监听 ${BIND_SOCKET} (log: ${VPROXY_LOG})"
+    exec vproxy run --bind "$BIND_SOCKET" auto
 fi

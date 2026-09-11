@@ -11,13 +11,15 @@ services:
     ports:
       - "1080:1080"
     # environment:
-    #   - BIND_ADDR=::                # SOCKS5 监听地址，默认 ::，支持 IPv4/IPv6 双栈
-    #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
+    #   - BIND_ADDR=::                # 代理监听地址，默认 ::（vproxy auto 模式自动识别协议）
+    #   - BIND_PORT=1080              # 代理监听端口，默认 1080
     #   - ENABLE_IPV6=1               # 启用 IPv6 出口和路由，默认 1；如需禁用可设为 0
-    #   - SOCKS_USER=admin            # SOCKS5 认证用户名，留空则为无密码模式
-    #   - SOCKS_PASS=123456           # SOCKS5 认证密码，需与 SOCKS_USER 同时设置
+    #   - SOCKS_USER=admin            # 代理认证用户名，留空则为无密码模式
+    #   - SOCKS_PASS=123456           # 代理认证密码，需与 SOCKS_USER 同时设置
+    #   - LOG_LEVEL=error             # vproxy 日志级别: trace/debug/info/warn/error，默认 error
     #   - ENDPOINT_IP=162.159.192.1:4500  # 自定义 WARP 节点 IP，用于绕过 HK/US 机房的 CF reserved 字节阻断
     #   - GH_PROXY=https://github.ednovas.xyz  # GitHub 代理前缀，仅用于加速 wgcf 二进制下载
+    #   - WARP_PROXY=http://127.0.0.1:7890     # 注册走 HTTP/SOCKS5 代理，绕过数据中心 IP 注册限流（推荐住宅 IP）
     #   - TAILSCALE_CIDR=100.64.0.0/10     # Tailscale 回程路由 CIDR，默认 100.64.0.0/10，非 Tailscale 场景无需设置
     #   - MICROWARP_TEST_MODE=0       # 测试模式，设为 1 时跳过所有初始化逻辑，用于 CI/调试
     cap_add:
