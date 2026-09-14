@@ -38,6 +38,17 @@ cp -f /app/warp_register.sh /etc/wireguard/warp_register.sh
 if [ ! -f "$WG_CONF" ]; then
     echo "==> [MicroWARP] 未检测到配置，正在全自动初始化 Cloudflare WARP..."
 
+    echo "==> [MicroWARP] 优先使用原生注册流程..."
+    if python3 /app/warp_register.py "$WG_CONF" --retries 3; then
+        echo "==> [MicroWARP] 原生注册流程成功！"
+    else
+        echo "==> [MicroWARP] 原生注册流程 3 次失败，回退到 wgcf 注册流程..."
+    fi
+fi
+
+if [ ! -f "$WG_CONF" ]; then
+    echo "==> [MicroWARP] 正在使用 wgcf 初始化 Cloudflare WARP..."
+
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) WGCF_ARCH="amd64" ;;

@@ -123,6 +123,8 @@ warp=plus
 
 ## Troubleshooting: Manual WARP Config Generation
 
+On first startup, the container tries the native registration flow first (up to 3 attempts). If all attempts fail, it falls back automatically to the original `wgcf` registration flow.
+
 If the container logs show WARP registration failures (typically caused by datacenter IP rate limiting by Cloudflare), you can generate the WireGuard config on your local machine and mount it into the container.
 
 ### Step 1: Generate `wg0.conf` locally

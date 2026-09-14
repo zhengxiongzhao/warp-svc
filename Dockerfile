@@ -21,7 +21,7 @@ RUN git clone --depth 1 --branch master https://github.com/zhengxiongzhao/vproxy
 FROM alpine:latest
 
 # 仅安装必要的内核级 WireGuard、网络控制工具和 vproxy 运行时依赖
-RUN apk add --no-cache wireguard-tools iptables iproute2 wget curl
+RUN apk add --no-cache wireguard-tools iptables iproute2 wget curl python3
 
 # 打包 vproxy
 COPY --from=builder /src/target/release/vproxy /usr/local/bin/vproxy
@@ -29,6 +29,7 @@ COPY --from=builder /src/target/release/vproxy /usr/local/bin/vproxy
 WORKDIR /app
 COPY entrypoint.sh .
 COPY warp_register.sh .
+COPY warp_register.py /app/warp_register.py
 RUN chmod +x entrypoint.sh
 
 # 启动引擎
