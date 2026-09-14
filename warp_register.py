@@ -14,6 +14,10 @@ from pathlib import Path
 API_BASE = "https://api.cloudflareclient.com/v0a2158/reg"
 CLIENT_VERSION = "a-7.21-0721"
 
+# 代理兜底：优先 --proxy 参数，其次 WARP_PROXY 环境变量。
+# 标准 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 由 urllib 默认行为自动生效。
+PROXY = os.environ.get("WARP_PROXY", "")
+
 
 class RegistrationError(RuntimeError):
     pass
@@ -23,7 +27,26 @@ def log(message):
     print(f"==> [WARP-REGISTER] {message}", flush=True)
 
 
-def request_json(url, method="GET", payload=None, token=None):
+def build_opener(proxy):
+    """根据代理配置构造 urllib opener。
+
+    - proxy 为空：返回 None，走 urllib 默认行为（自动读取 HTTP_PROXY 等环境变量）。
+    - proxy 为 http/https：返回带 ProxyHandler 的 opener。
+    - proxy 为 socks/socks5：抛错，因为 urllib 不原生支持 socks。
+    """
+    if not proxy:
+        return None
+    if not proxy.lower().startswith(("http://", "https://")):
+        raise RegistrationError(
+            "unsupported proxy scheme, only http:// and https:// are supported: "
+            f"{proxy}"
+        )
+    log(f"using proxy: {proxy}")
+    handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    return urllib.request.build_opener(handler)
+
+
+def request_json(url, method="GET", payload=None, token=None, proxy=None):
     body = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(url, data=body, method=method)
     request.add_header("CF-Client-Version", CLIENT_VERSION)
@@ -32,7 +55,11 @@ def request_json(url, method="GET", payload=None, token=None):
     if token:
         request.add_header("Authorization", f"Bearer {token}")
 
+    opener = build_opener(proxy)
     try:
+        if opener is not None:
+            with opener.open(request, timeout=10) as response:
+                return json.loads(response.read())
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.loads(response.read())
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
@@ -98,7 +125,7 @@ def build_wg_conf(private_key, ipv4, ipv6, endpoint, peer_public_key, reserved):
     )
 
 
-def register_once(output, private_key, public_key):
+def register_once(output, private_key, public_key, proxy=None):
     tos = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
     registration = request_json(
         API_BASE,
@@ -110,6 +137,7 @@ def register_once(output, private_key, public_key):
             "model": "warp-register",
             "name": os.uname().nodename,
         },
+        proxy=proxy,
     )
 
     try:
@@ -121,7 +149,7 @@ def register_once(output, private_key, public_key):
     except (TypeError, KeyError) as error:
         raise RegistrationError(f"incomplete registration response: {error}") from error
 
-    details = request_json(f"{API_BASE}/{device_id}", token=token)
+    details = request_json(f"{API_BASE}/{device_id}", token=token, proxy=proxy)
     ipv4, ipv6, endpoint, peer_public_key, reserved = extract_warp_config(
         registration, details
     )
@@ -136,7 +164,7 @@ def register_once(output, private_key, public_key):
     )
 
 
-def register(output, retries=3, retry_delay=5):
+def register(output, retries=3, retry_delay=5, proxy=None):
     if output.exists():
         raise RegistrationError(f"output already exists: {output}")
 
@@ -144,7 +172,7 @@ def register(output, retries=3, retry_delay=5):
         try:
             private_key, public_key = generate_wireguard_key()
             log(f"registering WARP device ({attempt}/{retries})...")
-            register_once(output, private_key, public_key)
+            register_once(output, private_key, public_key, proxy=proxy)
             return
         except (RegistrationError, subprocess.SubprocessError) as error:
             log(f"attempt {attempt} failed: {error}")
@@ -159,13 +187,21 @@ def parse_args():
     parser.add_argument("output", type=Path)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--retry-delay", type=int, default=5)
+    parser.add_argument(
+        "--proxy",
+        default=PROXY,
+        help=(
+            "HTTP(S) 代理地址，如 http://127.0.0.1:1080；"
+            "默认取 WARP_PROXY 环境变量；空则使用系统 HTTP_PROXY/HTTPS_PROXY"
+        ),
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     try:
-        register(args.output, args.retries, args.retry_delay)
+        register(args.output, args.retries, args.retry_delay, proxy=args.proxy)
     except RegistrationError as error:
         log(str(error))
         return 1

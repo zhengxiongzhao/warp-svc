@@ -175,7 +175,10 @@ docker-compose restart
       - SOCKS_USER=admin      # Enable authentication
       - SOCKS_PASS=123456     # Auth password
       - DEBUG=false           # true 时输出 MicroSOCKS 详细日志（默认静默 -q）
-      
+
+      # 原生注册 API 的 HTTP(S) 代理（仅 http/https scheme，socks 不支持）
+      # - WARP_PROXY=http://127.0.0.1:1080
+
       # ⚠️ Port Hopping (Mitigating Datacenter QoS):
       # If your VPS is in a datacenter (e.g., DMIT, AWS) where UDP 2408 is throttled or blocked,
       # use port 4500 (standard IPsec NAT-T) to bypass restrictive firewall rules.
