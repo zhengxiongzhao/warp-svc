@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## [v3.4.0] - 2026-09-15
+
+### Changed
+- Endpoint 自动优选重构为三级链：Tier 1 官方 `engage.cloudflareclient.com:2408` → Tier 2 Misaka `warp-yxip` 优选前 10 个 IP:Port（`wget warp-yxip.sh && bash warp-yxip.sh`）→ Tier 3 冷却重试
+- 移除旧固定 IP×端口笛卡尔积候选列表（11 IP × 7 端口 = 77 次盲握手，重启循环下放大 CF 限速）
+- 全链失败后不再退出容器，进入可配置冷却期（`COOLDOWN_SECONDS`，默认 24h）后自动重试完整链
+- Dockerfile 新增 Tier 2 运行依赖：`bash gcompat libstdc++`（优选工具为 glibc 二进制，gcompat 提供 musl 兼容层）
+
 ## [v3.3.0] - 2026-09-15
 
 ### Changed

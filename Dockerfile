@@ -16,7 +16,7 @@ ARG TARGETARCH
 ARG VPROXY_TAG=
 ARG GH_PROXY=
 
-RUN apk add --no-cache wireguard-tools iptables iproute2 wget curl python3
+RUN apk add --no-cache wireguard-tools iptables iproute2 wget curl python3 bash gcompat libstdc++
 
 # 下载并校验 vproxy 预编译二进制 (musl 静态链接, 无运行时依赖)
 RUN set -eux; \

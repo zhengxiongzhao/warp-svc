@@ -189,6 +189,7 @@ docker-compose restart
 | `MTU` | `1280` | WireGuard interface MTU |
 | `ENDPOINT_IP` | _(empty)_ | Manually pin a WARP Endpoint (e.g. `162.159.192.1:4500`) |
 | `ENDPOINT_AUTO` | `1` | `0` disables Endpoint auto-selection |
+| `COOLDOWN_SECONDS` | `86400` | Cooldown (seconds) before retrying the full endpoint chain after Tier 1 (official `engage.cloudflareclient.com:2408`) + Tier 2 (Misaka `warp-yxip` top-10 preferred endpoints) both fail |
 | `TAILSCALE_CIDR` | `100.64.0.0/10` | CIDR whose return route is restored (e.g. Tailscale) |
 | `WARP_PROXY` | _(empty)_ | HTTP(S) proxy for the native registration API |
 | `GH_PROXY` | _(empty)_ | GitHub proxy prefix for downloading `wgcf` |
