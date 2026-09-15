@@ -124,9 +124,8 @@ firewall-cmd --zone=public --add-masquerade --permanent
 | `ENABLE_IPV6` | `1` | Enable IPv6 routing and IPv6 egress, `0` to disable |
 | `MTU` | `1280` | WireGuard interface MTU |
 | `ENDPOINT_IP` | _(empty)_ | Manually pin a WARP Endpoint (e.g. `162.159.192.1:4500`), skips auto-selection |
-| `ENDPOINT_AUTO` | `1` | `0` disables Endpoint auto-selection and uses the wgcf default |
-| `ENDPOINT_IPS` | built-in list | Space-separated candidate WARP Endpoint IPs for auto-selection |
-| `ENDPOINT_PORTS` | built-in list | Space-separated candidate WARP Endpoint ports (2408 500 4500 …) |
+| `ENDPOINT_AUTO` | `1` | `0` disables Endpoint auto-selection |
+| `COOLDOWN_SECONDS` | `86400` | Cooldown (seconds) before retrying the full endpoint chain after Tier 1 (official `engage.cloudflareclient.com:2408`) + Tier 2 (Misaka `warp-yxip` top-10 preferred endpoints) both fail. Set `0` to disable cooldown and retry immediately |
 | `ENDPOINT_TEST_TIMEOUT` | `8` | Seconds to wait for a handshake per Endpoint |
 | `ENDPOINT_READY_RETRIES` | `5` | Data-plane readiness retries after a successful handshake |
 | `ENDPOINT_READY_INTERVAL` | `3` | Seconds between readiness checks |

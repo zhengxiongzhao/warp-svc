@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## [v3.4.1] - 2026-09-15
+
+### Removed
+- 清除 v3.4.0 三级优选链重构后的死代码：`DEFAULT_ENDPOINT_IPS`/`DEFAULT_ENDPOINT_PORTS` 固定列表定义及 `ENDPOINT_IPS`/`ENDPOINT_PORTS` 环境变量覆盖（已无消费方）
+- README-hub.md 同步移除 `ENDPOINT_IPS`/`ENDPOINT_PORTS` 环境变量行，补全 `COOLDOWN_SECONDS` 说明
+
 ## [v3.4.0] - 2026-09-15
 
 ### Changed

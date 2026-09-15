@@ -179,15 +179,9 @@ fi
 # ==========================================
 # 3. Endpoint 自动优选 & 启动 wg0
 # ==========================================
+# 优选链：Tier 1 官方域名 engage:2408 → Tier 2 Misaka warp-yxip 优选 top10 → Tier 3 冷却重试
+# 手动指定：ENDPOINT_IP=IP:PORT 跳过自动优选；ENDPOINT_AUTO=0 直接使用持久化配置中的 Endpoint
 
-# 默认候选 IP：WARP 核心段 + Cloudflare Anycast 抽样
-DEFAULT_ENDPOINT_IPS="162.159.192.1 162.159.193.1 162.159.193.5 162.159.194.1 162.159.195.1 162.159.196.1 162.159.197.1 104.16.0.1 104.24.0.1 172.64.0.1 162.158.0.1"
-# 默认候选端口：WARP 核心端口 + WireGuard 兼容端口
-DEFAULT_ENDPOINT_PORTS="2408 500 4500 1701 4443 8443 51820"
-
-# 环境变量覆盖
-ENDPOINT_IPS="${ENDPOINT_IPS:-$DEFAULT_ENDPOINT_IPS}"
-ENDPOINT_PORTS="${ENDPOINT_PORTS:-$DEFAULT_ENDPOINT_PORTS}"
 ENDPOINT_TEST_TIMEOUT="${ENDPOINT_TEST_TIMEOUT:-8}"
 ENDPOINT_READY_RETRIES="${ENDPOINT_READY_RETRIES:-5}"
 ENDPOINT_READY_INTERVAL="${ENDPOINT_READY_INTERVAL:-3}"
