@@ -177,10 +177,10 @@ else
 fi
 
 # ==========================================
-# 3. Endpoint 自动优选 & 启动 wg0
+# 3. Endpoint 自动选择 & 启动 wg0
 # ==========================================
-# 优选链：Tier 1 官方域名 engage:2408 → Tier 2 Misaka warp-yxip 优选 top10 → Tier 3 冷却重试
-# 手动指定：ENDPOINT_IP=IP:PORT 跳过自动优选；ENDPOINT_AUTO=0 直接使用持久化配置中的 Endpoint
+# 连接链：engage.cloudflareclient.com:2408 → 优选列表前 10 个 IP:Port → 冷却重试
+# 手动指定：ENDPOINT_IP=IP:PORT 跳过自动选择；ENDPOINT_AUTO=0 直接使用持久化配置中的 Endpoint
 
 ENDPOINT_TEST_TIMEOUT="${ENDPOINT_TEST_TIMEOUT:-8}"
 ENDPOINT_READY_RETRIES="${ENDPOINT_READY_RETRIES:-5}"
@@ -287,56 +287,56 @@ try_wg_endpoint() {
     return 1
 }
 
-# 运行 Misaka warp-yxip 优选，成功时导出 YXIP_CANDIDATES（前 10 个 IP:Port）
-run_yxip_preference() {
-    local workdir="/tmp/warp-yxip"
+# 生成 Endpoint 优选列表，成功时导出 ENDPOINT_CANDIDATES（前 10 个 IP:Port）
+build_endpoint_candidates() {
+    local workdir="/tmp/warp-endpoint-candidates"
     rm -rf "$workdir"; mkdir -p "$workdir" || return 1
     cd "$workdir" || return 1
 
-    echo "==> [MicroWARP] 正在下载 Misaka WARP Endpoint 优选脚本..."
+    echo "==> [MicroWARP] 正在获取 Endpoint 优选列表..."
     # 用户指定的原始命令；附加 -T 超时与 -q 静默
-    if ! wget -N -T 20 -q "https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/warp-yxip.sh"; then
-        echo "==> [MicroWARP] ❌ 优选脚本下载失败"
+    if ! wget -N -T 20 -q "https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/warp-yxip.sh" -O endpoint-preference.sh; then
+        echo "==> [MicroWARP] ❌ Endpoint 优选列表获取失败"
         cd / || return 1
         return 1
     fi
-    chmod +x warp-yxip.sh
+    chmod +x endpoint-preference.sh
 
     # 脚本菜单在 stdin 为空/EOF 时走默认分支 (IPv4 优选)，无头安全
     echo "==> [MicroWARP] 正在运行 Endpoint 优选测试 (约 1-3 分钟)..."
-    if ! bash warp-yxip.sh < /dev/null > yxip.log 2>&1; then
-        echo "==> [MicroWARP] ❌ 优选脚本执行失败:"
-        tail -5 yxip.log | sed 's/^/    [yxip] /'
+    if ! bash endpoint-preference.sh < /dev/null > endpoint-preference.log 2>&1; then
+        echo "==> [MicroWARP] ❌ Endpoint 优选列表生成失败:"
+        tail -5 endpoint-preference.log | sed 's/^/    [endpoint] /'
         cd / || return 1
         return 1
     fi
-    tail -15 yxip.log | sed 's/^/    [yxip] /'
+    tail -15 endpoint-preference.log | sed 's/^/    [endpoint] /'
 
     # result.csv 格式: IP:Port,Loss,Latency (首行为表头)
     if [ ! -s result.csv ]; then
-        echo "==> [MicroWARP] ❌ 优选完成但未生成 result.csv"
+        echo "==> [MicroWARP] ❌ Endpoint 优选列表生成完成但结果为空"
         cd / || return 1
         return 1
     fi
 
-    YXIP_CANDIDATES=$(tail -n +2 result.csv | grep -E '^[0-9a-fA-F:.]+:[0-9]+,' | head -10 | cut -d, -f1)
-    if [ -z "$YXIP_CANDIDATES" ]; then
-        echo "==> [MicroWARP] ❌ result.csv 无有效候选"
+    ENDPOINT_CANDIDATES=$(tail -n +2 result.csv | grep -E '^[0-9a-fA-F:.]+:[0-9]+,' | head -10 | cut -d, -f1)
+    if [ -z "$ENDPOINT_CANDIDATES" ]; then
+        echo "==> [MicroWARP] ❌ Endpoint 优选列表无有效候选"
         cd / || return 1
         return 1
     fi
 
     echo "==> [MicroWARP] 优选候选 (前 10):"
-    printf '%s\n' "$YXIP_CANDIDATES" | sed 's/^/    [yxip]   /'
+    printf '%s\n' "$ENDPOINT_CANDIDATES" | sed 's/^/    [endpoint] /'
     cd / || return 1
     return 0
 }
 
 # 构建候选列表并自动选择
 select_and_start_warp_endpoint() {
-    # 如果用户手动指定了 ENDPOINT_IP，则直接使用，跳过自动优选
+    # 如果用户手动指定了 ENDPOINT_IP，则直接使用，跳过自动选择
     if [ -n "$ENDPOINT_IP" ]; then
-        echo "==> [MicroWARP] 检测到手动指定 ENDPOINT_IP: $ENDPOINT_IP，跳过自动优选"
+        echo "==> [MicroWARP] 检测到手动指定 ENDPOINT_IP: $ENDPOINT_IP，跳过自动选择"
         parse_manual_endpoint "$ENDPOINT_IP"
         set_wg_endpoint "$MANUAL_ENDPOINT_HOST" "$MANUAL_ENDPOINT_PORT"
         echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
@@ -344,51 +344,47 @@ select_and_start_warp_endpoint() {
         return 0
     fi
 
-    # 如果关闭自动优选，使用 wgcf 生成的默认 Endpoint
+    # 如果关闭自动选择，使用 wgcf 生成的默认 Endpoint
     if [ "$ENDPOINT_AUTO" != "1" ]; then
-        echo "==> [MicroWARP] 自动优选已关闭 (ENDPOINT_AUTO=0)，使用 wgcf 默认 Endpoint"
+        echo "==> [MicroWARP] 自动选择已关闭 (ENDPOINT_AUTO=0)，使用 wgcf 默认 Endpoint"
         echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
         wg-quick up wg0 > /dev/null 2>&1
         return 0
     fi
 
-    echo "==> [MicroWARP] 开始自动优选 Cloudflare WARP Endpoint..."
 
-    # ===== Tier 1/3: 官方域名 engage.cloudflareclient.com:2408 =====
-    echo "==> [MicroWARP] [Tier 1/3] 尝试官方 Endpoint: engage.cloudflareclient.com:2408 ..."
+    echo "==> [MicroWARP] 开始连接 Endpoint: engage.cloudflareclient.com:2408 ..."
     if try_wg_endpoint "engage.cloudflareclient.com" "2408"; then
-        echo "==> [MicroWARP] ✅ [Tier 1/3] 官方 Endpoint 连接成功"
+        echo "==> [MicroWARP] ✅ Endpoint engage.cloudflareclient.com:2408 连接成功"
         return 0
     fi
-    echo "==> [MicroWARP] ❌ [Tier 1/3] 官方 Endpoint 失败，进入 Tier 2 优选..."
+    echo "==> [MicroWARP] ❌ Endpoint engage.cloudflareclient.com:2408 连接失败，进入优选列表..."
 
-    # ===== Tier 2/3: Misaka warp-yxip 优选前 10 个 IP:Port =====
-    if run_yxip_preference; then
-        for cand in $YXIP_CANDIDATES; do
-            yxip="${cand%%:*}"
-            yxport="${cand##*:}"
-            echo "==> [MicroWARP] [Tier 2/3] 尝试优选 Endpoint: ${yxip}:${yxport} ..."
-            if try_wg_endpoint "$yxip" "$yxport"; then
-                echo "==> [MicroWARP] ✅ [Tier 2/3] 优选 Endpoint ${yxip}:${yxport} 连接成功"
+    if build_endpoint_candidates; then
+        for candidate in $ENDPOINT_CANDIDATES; do
+            candidate_host="${candidate%%:*}"
+            candidate_port="${candidate##*:}"
+            echo "==> [MicroWARP] 尝试优选 Endpoint: ${candidate_host}:${candidate_port} ..."
+            if try_wg_endpoint "$candidate_host" "$candidate_port"; then
+                echo "==> [MicroWARP] ✅ 优选 Endpoint ${candidate_host}:${candidate_port} 连接成功"
                 return 0
             fi
         done
-        echo "==> [MicroWARP] ❌ [Tier 2/3] 全部优选 Endpoint 失败，进入 Tier 3 冷却..."
+        echo "==> [MicroWARP] ❌ 优选列表全部 Endpoint 失败，进入冷却..."
     else
-        echo "==> [MicroWARP] ❌ [Tier 2/3] 优选脚本未产出可用候选，进入 Tier 3 冷却..."
+        echo "==> [MicroWARP] ❌ 优选列表未产出可用候选，进入冷却..."
     fi
 
-    # ===== Tier 3/3: 冷却 24h 后自动重试完整优选链 =====
     echo ""
     echo "==> [ERROR] =========================================="
-    echo "==> [ERROR] Tier 1/2 全部失败：官方 Endpoint 与优选 Endpoint 均不可达"
+    echo "==> [ERROR] 全部 Endpoint 失败：默认连接与优选列表均不可达"
     echo "==> [ERROR] 可能原因: 本机出口 IP 被 Cloudflare 限速/风控，或 UDP 出网受限"
     egress_ip=$(curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep '^ip=' | cut -d= -f2)
     echo "==> [ERROR] 当前出口 IP: ${egress_ip:-未知}"
     echo "==> [ERROR] =========================================="
     COOLDOWN_SECONDS=${COOLDOWN_SECONDS:-86400}
-    echo "==> [MicroWARP] [Tier 3/3] 进入冷却期 ${COOLDOWN_SECONDS}s (24h)，期间不向 Cloudflare 发起请求，避免限速恶化"
-    echo "==> [MicroWARP] 冷却结束后将自动重试完整优选链 (Tier 1 -> Tier 2 -> Tier 3)"
+    echo "==> [MicroWARP] 进入冷却期 ${COOLDOWN_SECONDS}s，期间不向 Cloudflare 发起请求，避免限速恶化"
+    echo "==> [MicroWARP] 冷却结束后将自动重试完整连接流程..."
     sleep "$COOLDOWN_SECONDS"
     echo "==> [MicroWARP] 冷却结束，重新执行完整启动流程..."
     exec /app/entrypoint.sh

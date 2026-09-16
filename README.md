@@ -21,7 +21,7 @@ This image uses the Linux kernel WireGuard tunnel (built-in) + the lightweight *
 🛡️ **Single-port Multi-protocol** - vproxy auto-detects SOCKS5/HTTP/HTTPS on one port
 ⚡ **WARP+ Support** - Via locally generated `wgcf` profile
 🌐 **IPv6 Dual-stack Support** - Proxy IPv4 and IPv6 traffic through WARP
-🔄 **Endpoint Auto-selection** - Picks the fastest WARP Endpoint automatically
+🔄 **Endpoint Auto-selection** - Tries `engage.cloudflareclient.com:2408` first, then falls back to a preferred endpoint list and validates the IPv4 data plane
 🐳 **Multi-arch Support** - Works on amd64 and arm64 platforms
 
 ---
@@ -188,14 +188,28 @@ docker-compose restart
 | `ENABLE_IPV6` | `1` | Enable IPv6 routing and IPv6 egress, `0` to disable |
 | `MTU` | `1280` | WireGuard interface MTU |
 | `ENDPOINT_IP` | _(empty)_ | Manually pin a WARP Endpoint (e.g. `162.159.192.1:4500`) |
-| `ENDPOINT_AUTO` | `1` | `0` disables Endpoint auto-selection |
-| `COOLDOWN_SECONDS` | `86400` | Cooldown (seconds) before retrying the full endpoint chain after Tier 1 (official `engage.cloudflareclient.com:2408`) + Tier 2 (Misaka `warp-yxip` top-10 preferred endpoints) both fail |
+| `ENDPOINT_AUTO` | `1` | `0` disables Endpoint fallback selection and uses the configured Endpoint |
+| `COOLDOWN_SECONDS` | `86400` | Cooldown (seconds) before retrying the full Endpoint chain after the direct `engage.cloudflareclient.com:2408` Endpoint and the top-10 preferred Endpoints all fail |
 | `TAILSCALE_CIDR` | `100.64.0.0/10` | CIDR whose return route is restored (e.g. Tailscale) |
-| `WARP_PROXY` | _(empty)_ | HTTP(S) proxy for the native registration API |
+| `WARP_PROXY` | _(empty)_ | HTTP(S) proxy used only by the native Cloudflare registration API. Supports only `http://` and `https://`; ignored when an existing `wg0.conf` is present |
 | `GH_PROXY` | _(empty)_ | GitHub proxy prefix for downloading `wgcf` |
 | `MICROWARP_TEST_MODE` | `0` | `1` skips all initialization logic (for CI/debugging) |
 
-> For the complete variable reference (including Endpoint auto-selection tuning and registration flows), see [README-hub.md](README-hub.md).
+> For the complete variable reference (including Endpoint fallback-selection tuning and registration flows), see [README-hub.md](README-hub.md).
+
+#### `WARP_PROXY` Notes
+
+Use `WARP_PROXY` when first-time registration cannot access `api.cloudflareclient.com` directly:
+
+```yaml
+environment:
+  - WARP_PROXY=http://192.168.1.10:8080
+```
+
+- Valid values include `http://host:port`, `http://user:pass@host:port`, and the corresponding `https://` forms.
+- The proxy applies only to registration API requests. It does not affect WireGuard Endpoint testing, Endpoint fallback selection, runtime proxy traffic, or WARP data forwarding.
+- SOCKS proxies are not supported; use an HTTP(S) proxy instead.
+- If empty, the standard `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` environment variables may still be used by Python's `urllib`.
 
 ### IPv6 Dual-stack
 
